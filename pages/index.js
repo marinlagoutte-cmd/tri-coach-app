@@ -1,20 +1,57 @@
 import { useState, useRef, useEffect } from 'react';
 
 export default function Home() {
-  const [messages, setMessages] = useState([
-    {
-      sender: 'coach',
-      text: "Salut Marin ! Profil chargé. VMA : 20 km/h | FTP : 350W. On part sur du direct et du cash : pas de volume poubelle. Qu'est-ce qu'on travaille aujourd'hui ?"
-    }
-  ]);
+  // 1. État du profil avec valeurs par défaut
+  const [profile, setProfile] = useState({
+    name: 'Marin',
+    vma: 20,
+    ftp: 350,
+    weight: 87,
+    nat100: '1:38'
+  });
+
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const chatEndRef = useRef(null);
+
+  // 2. Charger le profil et l'historique depuis le LocalStorage au démarrage
+  useEffect(() => {
+    const savedProfile = localStorage.getItem('tri_coach_profile');
+    if (savedProfile) {
+      try { setProfile(JSON.parse(savedProfile)); } catch (e) {}
+    }
+
+    const savedMessages = localStorage.getItem('tri_coach_chat');
+    if (savedMessages) {
+      try { setMessages(JSON.parse(savedMessages)); } catch (e) {}
+    } else {
+      setMessages([{
+        sender: 'coach',
+        text: "Salut Marin ! Ton profil est chargé. On part sur du direct et du cash : pas de volume poubelle. Qu'est-ce qu'on travaille aujourd'hui ?"
+      }]);
+    }
+  }, []);
+
+  // Sauvegarder les messages quand ils changent
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem('tri_coach_chat', JSON.stringify(messages));
+    }
+  }, [messages]);
 
   // Auto-scroll vers le bas
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
+
+  // Save profile
+  const handleProfileChange = (key, value) => {
+    const updated = { ...profile, [key]: value };
+    setProfile(updated);
+    localStorage.setItem('tri_coach_profile', JSON.stringify(updated));
+  };
 
   const sendMessage = async (customText) => {
     const textToSend = customText || input;
@@ -31,7 +68,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: textToSend,
-          profile: { name: 'Marin', vma: 20, ftp: 350, weight: 87, nat100: '1:38' }
+          profile: profile // On envoie les vraies métriques ajustées !
         })
       });
 
@@ -44,24 +81,41 @@ export default function Home() {
     }
   };
 
+  const resetChat = () => {
+    if (confirm("Effacer la conversation avec le coach ?")) {
+      const initial = [{
+        sender: 'coach',
+        text: `Profil mis à jour (${profile.vma} km/h | ${profile.ftp}W). On repart à zéro. Qu'est-ce qu'on travaille ?`
+      }];
+      setMessages(initial);
+      localStorage.setItem('tri_coach_chat', JSON.stringify(initial));
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen bg-ria-bg text-gray-100 font-sans antialiased selection:bg-ria-neon selection:text-ria-darkText">
       
-      {/* HEADER RIA STYLE */}
-      <header className="flex items-center justify-between px-5 py-4 bg-ria-card/80 backdrop-blur-md border-b border-ria-border sticky top-0 z-10">
+      {/* HEADER RIA STYLE WITH QUICK STATS */}
+      <header className="flex items-center justify-between px-5 py-4 bg-ria-card/90 backdrop-blur-md border-b border-ria-border sticky top-0 z-10">
         <div className="flex items-center space-x-3">
           <div className="w-3 h-3 rounded-full bg-ria-neon animate-pulse" />
           <h1 className="text-xl font-black uppercase tracking-wider text-white">
             TRI<span className="text-ria-neon">-COACH</span>
           </h1>
         </div>
-        <div className="flex items-center space-x-2 text-xs font-mono bg-ria-bg px-3 py-1.5 rounded-full border border-ria-border">
+
+        {/* Bouton de métriques pour ouvrir la modale */}
+        <button
+          onClick={() => setShowProfileModal(true)}
+          className="flex items-center space-x-2 text-xs font-mono bg-ria-bg px-3 py-1.5 rounded-full border border-ria-border hover:border-ria-neon transition-colors"
+        >
           <span className="text-gray-400">VMA</span>
-          <span className="text-ria-neon font-bold">20</span>
+          <span className="text-ria-neon font-bold">{profile.vma}</span>
           <span className="text-gray-600">|</span>
           <span className="text-gray-400">FTP</span>
-          <span className="text-ria-neon font-bold">350W</span>
-        </div>
+          <span className="text-ria-neon font-bold">{profile.ftp}W</span>
+          <span className="ml-1 text-gray-400">⚙️</span>
+        </button>
       </header>
 
       {/* ZONE DE CHAT */}
@@ -72,9 +126,9 @@ export default function Home() {
             className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[85%] rounded-2xl px-5 py-3.5 leading-relaxed text-sm ${
+              className={`max-w-[88%] rounded-2xl px-5 py-3.5 leading-relaxed text-sm ${
                 msg.sender === 'user'
-                  ? 'bg-ria-neon text-ria-darkText font-medium rounded-br-none shadow-lg shadow-ria-neon/10'
+                  ? 'bg-ria-neon text-ria-darkText font-semibold rounded-br-none shadow-lg shadow-ria-neon/10'
                   : 'bg-ria-card border border-ria-border text-gray-200 rounded-bl-none whitespace-pre-line'
               }`}
             >
@@ -103,7 +157,6 @@ export default function Home() {
 
       {/* QUICK ACTIONS & BARRE DE SAISIE */}
       <footer className="p-4 bg-ria-card/90 border-t border-ria-border max-w-3xl mx-auto w-full space-y-3">
-        {/* Raccourcis tactiques */}
         <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none text-xs">
           {[
             "⚡ Séance CAP 5km D3",
@@ -121,7 +174,6 @@ export default function Home() {
           ))}
         </div>
 
-        {/* Input Text */}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -145,6 +197,95 @@ export default function Home() {
           </button>
         </form>
       </footer>
+
+      {/* MODALE REGLAGES PROFIL ATHLÈTE */}
+      {showProfileModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-ria-card border border-ria-border w-full max-w-md rounded-2xl p-6 space-y-5">
+            <div className="flex items-center justify-between border-b border-ria-border pb-3">
+              <h2 className="text-lg font-black uppercase tracking-wider text-white">
+                MÉTRIQUES <span className="text-ria-neon">ATHLÈTE</span>
+              </h2>
+              <button
+                onClick={() => setShowProfileModal(false)}
+                className="text-gray-400 hover:text-white font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="block text-gray-400 font-mono mb-1">Nom / Pseudo</label>
+                <input
+                  type="text"
+                  value={profile.name}
+                  onChange={(e) => handleProfileChange('name', e.target.value)}
+                  className="w-full bg-ria-bg border border-ria-border rounded-lg p-2.5 text-white font-bold focus:border-ria-neon focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-mono mb-1">Poids (kg)</label>
+                <input
+                  type="number"
+                  value={profile.weight}
+                  onChange={(e) => handleProfileChange('weight', Number(e.target.value))}
+                  className="w-full bg-ria-bg border border-ria-border rounded-lg p-2.5 text-white font-bold focus:border-ria-neon focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-ria-neon font-mono mb-1">VMA (km/h)</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={profile.vma}
+                  onChange={(e) => handleProfileChange('vma', Number(e.target.value))}
+                  className="w-full bg-ria-bg border border-ria-border rounded-lg p-2.5 text-white font-bold focus:border-ria-neon focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-ria-neon font-mono mb-1">FTP (Watts)</label>
+                <input
+                  type="number"
+                  value={profile.ftp}
+                  onChange={(e) => handleProfileChange('ftp', Number(e.target.value))}
+                  className="w-full bg-ria-bg border border-ria-border rounded-lg p-2.5 text-white font-bold focus:border-ria-neon focus:outline-none"
+                />
+              </div>
+
+              <div className="col-span-2">
+                <label className="block text-gray-400 font-mono mb-1">Ref Natation (100m)</label>
+                <input
+                  type="text"
+                  value={profile.nat100}
+                  placeholder="ex: 1:38"
+                  onChange={(e) => handleProfileChange('nat100', e.target.value)}
+                  className="w-full bg-ria-bg border border-ria-border rounded-lg p-2.5 text-white font-bold focus:border-ria-neon focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex space-x-3 pt-2">
+              <button
+                onClick={resetChat}
+                className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-bold py-2.5 rounded-xl text-xs uppercase"
+              >
+                RAZ Discussion
+              </button>
+              <button
+                onClick={() => setShowProfileModal(false)}
+                className="flex-1 bg-ria-neon hover:bg-ria-neonHover text-ria-darkText font-black py-2.5 rounded-xl text-xs uppercase"
+              >
+                Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
