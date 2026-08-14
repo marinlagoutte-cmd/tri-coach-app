@@ -29,50 +29,35 @@ Règles strictes :
 Message athlète : ${message}
 `;
 
-  const modelsToTry = [
-    'gemini-1.5-flash',
-    'gemini-1.5-pro',
-    'gemini-2.0-flash'
-  ];
+  try {
+    // Endpoint V1 stable officiel pour Gemini 1.5 Flash
+    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-  let lastError = null;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      })
+    });
 
-  for (const model of modelsToTry) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const data = await response.json();
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        return res.status(200).json({ 
-          reply: data.candidates[0].content.parts[0].text 
-        });
-      }
-
-      if (data.error) {
-        lastError = data.error.message;
-        if (data.error.message.includes('not found')) {
-          continue;
-        } else {
-          return res.status(200).json({ reply: `❌ Erreur Google Gemini : ${data.error.message}` });
-        }
-      }
-    } catch (err) {
-      lastError = err.message;
+    if (data.error) {
+      return res.status(200).json({ reply: `❌ Erreur Google Gemini : ${data.error.message}` });
     }
-  }
 
-  return res.status(200).json({ 
-    reply: `❌ Impossible de joindre l'API Gemini. Dernier message : ${lastError}` 
-  });
+    const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!replyText) {
+      return res.status(200).json({ reply: "❌ Réponse vide reçue de l'IA." });
+    }
+
+    return res.status(200).json({ reply: replyText });
+
+  } catch (err) {
+    return res.status(200).json({ reply: `❌ Erreur serveur : ${err.message}` });
+  }
 }
