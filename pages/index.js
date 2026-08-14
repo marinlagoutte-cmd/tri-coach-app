@@ -26,6 +26,7 @@ export default function Home() {
   });
 
   const [activeWeek, setActiveWeek] = useState('N');
+  const [view, setView] = useState('dashboard'); // 'dashboard' | 'calendar'
   const [expandedCycle, setExpandedCycle] = useState(
     trainingPlan.cycles.find(c => c.active)?.id ?? null
   );
@@ -212,6 +213,20 @@ export default function Home() {
         </div>
 
         <div className="flex items-center space-x-2">
+          <div className="flex bg-ria-bg border border-ria-border rounded-full p-1 text-[11px] font-semibold mr-1">
+            <button
+              onClick={() => setView('dashboard')}
+              className={`px-3 py-1 rounded-full transition-all ${view === 'dashboard' ? 'bg-ria-neon text-white' : 'text-ria-sub'}`}
+            >
+              Dashboard
+            </button>
+            <button
+              onClick={() => setView('calendar')}
+              className={`px-3 py-1 rounded-full transition-all ${view === 'calendar' ? 'bg-ria-neon text-white' : 'text-ria-sub'}`}
+            >
+              Calendrier
+            </button>
+          </div>
           <button
             onClick={() => setShowQuestionnaire(true)}
             className="text-[11px] font-bold uppercase bg-ria-neon text-white px-3 py-1.5 rounded-full hover:bg-ria-neonHover transition-all"
@@ -233,204 +248,208 @@ export default function Home() {
       </header>
 
       <main className="max-w-4xl mx-auto w-full p-4 space-y-6">
-
-        {/* 1. CARTE OBJECTIF — dégradé + carte blanche superposée, façon maquette */}
-        <section className="rounded-3xl overflow-hidden shadow-lg border border-ria-border">
-          <div className="bg-gradient-to-br from-[#FF7A59] via-[#F2555A] to-[#3A5C99] px-5 pt-5 pb-12 text-white">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-widest text-white/90">Objectif</span>
-              <span className="text-xs font-mono font-bold bg-white/20 px-2.5 py-1 rounded-full">
-                J-{trainingPlan.daysLeft}
-              </span>
-            </div>
-            <div className="mt-3 h-1.5 w-full bg-white/25 rounded-full overflow-hidden">
-              <div className="h-full bg-white rounded-full" style={{ width: '35%' }} />
-            </div>
-          </div>
-
-          <div className="-mt-7 mx-3 mb-3 bg-white rounded-2xl shadow-md border border-ria-border p-5 relative z-10">
-            <div className="flex items-center space-x-3 pb-4 border-b border-ria-border">
-              <div className="w-10 h-10 rounded-xl bg-ria-bg flex items-center justify-center text-lg">🏁</div>
-              <div>
-                <h2 className="text-sm font-bold">{trainingPlan.title}</h2>
-                <p className="text-xs text-ria-sub">{trainingPlan.date}</p>
-              </div>
-            </div>
-
-            <div className="py-4">
-              <span className="text-[11px] text-ria-sub uppercase font-semibold tracking-wide">Objectif</span>
-              <div className="text-3xl font-black mt-1">{trainingPlan.targetTime}</div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 pb-4">
-              {[
-                { icon: '🏊', value: trainingPlan.splits.nat },
-                { icon: '🚴', value: trainingPlan.splits.bike },
-                { icon: '🏃', value: trainingPlan.splits.run }
-              ].map((s, idx) => (
-                <div key={idx} className="bg-ria-bg rounded-2xl py-3 flex flex-col items-center border border-ria-border">
-                  <span className="text-lg">{s.icon}</span>
-                  <span className="text-xs font-bold mt-1 font-mono">{s.value}</span>
+        {view === 'calendar' ? (
+          <CalendarView workouts={workouts} />
+        ) : (
+          <>
+            {/* 1. CARTE OBJECTIF */}
+            <section className="rounded-3xl overflow-hidden shadow-lg border border-ria-border">
+              <div className="bg-gradient-to-br from-[#FF7A59] via-[#F2555A] to-[#3A5C99] px-5 pt-5 pb-12 text-white">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-widest text-white/90">Objectif</span>
+                  <span className="text-xs font-mono font-bold bg-white/20 px-2.5 py-1 rounded-full">
+                    J-{trainingPlan.daysLeft}
+                  </span>
                 </div>
-              ))}
-            </div>
-
-            <div className="space-y-2 py-3 border-t border-ria-border text-xs">
-              <div className="flex justify-between">
-                <span className="text-ria-sub">Début de la préparation</span>
-                <span className="font-semibold">{trainingPlan.date}</span>
+                <div className="mt-3 h-1.5 w-full bg-white/25 rounded-full overflow-hidden">
+                  <div className="h-full bg-white rounded-full" style={{ width: '35%' }} />
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-ria-sub">Caractéristiques du triathlon</span>
-                <span className="font-semibold">{trainingPlan.terrain}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-ria-sub">Drafting autorisé ?</span>
-                <span className="font-semibold">{trainingPlan.drafting ? 'Oui' : 'Non'}</span>
-              </div>
-            </div>
 
-            <div className="pt-3 border-t border-ria-border">
-              <span className="text-[11px] text-ria-sub uppercase font-semibold tracking-wide">
-                Plan de la préparation annuelle
-              </span>
-              <div className="mt-2 space-y-2">
-                {trainingPlan.cycles.map((c) => {
-                  const isOpen = expandedCycle === c.id;
-                  return (
-                    <div key={c.id} className="border border-ria-border rounded-xl overflow-hidden">
-                      <button
-                        onClick={() => setExpandedCycle(isOpen ? null : c.id)}
-                        className="w-full flex items-center justify-between px-3 py-2.5 text-left bg-ria-bg/60 hover:bg-ria-bg transition-colors"
-                      >
-                        <div>
-                          <div className="text-[10px] text-ria-sub font-mono">
-                            Cycle {c.id} · {c.dates}
-                          </div>
-                          <div className="text-xs font-bold">
-                            {c.name.replace(/^Cycle \d+ - /, '')}
-                          </div>
-                        </div>
-                        <span className={`text-ria-neon transition-transform ${isOpen ? 'rotate-180' : ''}`}>
-                          ⌄
-                        </span>
-                      </button>
-                      {isOpen && (
-                        <div className="px-3 py-2.5 text-xs text-ria-sub bg-white border-t border-ria-border">
-                          {c.name}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* 2. CALENDRIER SÉANCES */}
-        <section className="bg-white border border-ria-border rounded-2xl p-5 shadow-sm space-y-4">
-          <div className="flex justify-between items-center border-b border-ria-border pb-3">
-            <div>
-              <h3 className="text-sm font-black uppercase tracking-wide">
-                Calendrier <span className="text-ria-neon">séances</span>
-              </h3>
-              <p className="text-[11px] text-ria-sub font-mono">
-                2 semaines de visibilité · Auto-génération le dimanche
-              </p>
-            </div>
-            <div className="flex bg-ria-bg border border-ria-border rounded-lg p-1 text-[11px] font-semibold">
-              <button
-                onClick={() => setActiveWeek('N')}
-                className={`px-3 py-1 rounded-md transition-all ${activeWeek === 'N' ? 'bg-ria-neon text-white' : 'text-ria-sub hover:text-ria-darkText'}`}
-              >
-                Semaine N
-              </button>
-              <button
-                onClick={() => setActiveWeek('N+1')}
-                className={`px-3 py-1 rounded-md transition-all ${activeWeek === 'N+1' ? 'bg-ria-neon text-white' : 'text-ria-sub hover:text-ria-darkText'}`}
-              >
-                Semaine N+1
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            {workouts[activeWeek].map((w) => (
-              <div
-                key={w.id}
-                className="bg-ria-bg border border-ria-border hover:border-ria-neon/40 rounded-xl p-3 flex flex-col md:flex-row md:items-center justify-between transition-all space-y-2 md:space-y-0"
-              >
-                <div className="flex items-center space-x-3">
-                  <div className="w-16 text-[11px] font-bold text-ria-sub uppercase">{w.day}</div>
+              <div className="-mt-7 mx-3 mb-3 bg-white rounded-2xl shadow-md border border-ria-border p-5 relative z-10">
+                <div className="flex items-center space-x-3 pb-4 border-b border-ria-border">
+                  <div className="w-10 h-10 rounded-xl bg-ria-bg flex items-center justify-center text-lg">🏁</div>
                   <div>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-xs font-bold">{w.title}</span>
-                      {w.modified && (
-                        <span className="bg-amber-100 text-amber-700 border border-amber-200 text-[9px] font-bold px-1.5 py-0.5 rounded">
-                          MODIFIÉ VIA CHAT
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-ria-sub">{w.desc}</p>
+                    <h2 className="text-sm font-bold">{trainingPlan.title}</h2>
+                    <p className="text-xs text-ria-sub">{trainingPlan.date}</p>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-3 text-[11px] font-mono self-end md:self-auto">
-                  <span className="bg-white px-2 py-1 rounded-md border border-ria-border text-ria-sub">{w.type}</span>
-                  <span className="text-ria-sub">{w.duration}</span>
-                  <span className="text-ria-neon font-bold">{w.intensity}</span>
+                <div className="py-4">
+                  <span className="text-[11px] text-ria-sub uppercase font-semibold tracking-wide">Objectif</span>
+                  <div className="text-3xl font-black mt-1">{trainingPlan.targetTime}</div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 pb-4">
+                  {[
+                    { icon: '🏊', value: trainingPlan.splits.nat },
+                    { icon: '🚴', value: trainingPlan.splits.bike },
+                    { icon: '🏃', value: trainingPlan.splits.run }
+                  ].map((s, idx) => (
+                    <div key={idx} className="bg-ria-bg rounded-2xl py-3 flex flex-col items-center border border-ria-border">
+                      <span className="text-lg">{s.icon}</span>
+                      <span className="text-xs font-bold mt-1 font-mono">{s.value}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="space-y-2 py-3 border-t border-ria-border text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-ria-sub">Début de la préparation</span>
+                    <span className="font-semibold">{trainingPlan.date}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-ria-sub">Caractéristiques du triathlon</span>
+                    <span className="font-semibold">{trainingPlan.terrain}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-ria-sub">Drafting autorisé ?</span>
+                    <span className="font-semibold">{trainingPlan.drafting ? 'Oui' : 'Non'}</span>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-ria-border">
+                  <span className="text-[11px] text-ria-sub uppercase font-semibold tracking-wide">
+                    Plan de la préparation annuelle
+                  </span>
+                  <div className="mt-2 space-y-2">
+                    {trainingPlan.cycles.map((c) => {
+                      const isOpen = expandedCycle === c.id;
+                      return (
+                        <div key={c.id} className="border border-ria-border rounded-xl overflow-hidden">
+                          <button
+                            onClick={() => setExpandedCycle(isOpen ? null : c.id)}
+                            className="w-full flex items-center justify-between px-3 py-2.5 text-left bg-ria-bg/60 hover:bg-ria-bg transition-colors"
+                          >
+                            <div>
+                              <div className="text-[10px] text-ria-sub font-mono">
+                                Cycle {c.id} · {c.dates}
+                              </div>
+                              <div className="text-xs font-bold">
+                                {c.name.replace(/^Cycle \d+ - /, '')}
+                              </div>
+                            </div>
+                            <span className={`text-ria-neon transition-transform ${isOpen ? 'rotate-180' : ''}`}>
+                              ⌄
+                            </span>
+                          </button>
+                          {isOpen && (
+                            <div className="px-3 py-2.5 text-xs text-ria-sub bg-white border-t border-ria-border">
+                              {c.name}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
-        </section>
+            </section>
 
-        {/* 3. CHAT COACH */}
-        <section className="bg-white border border-ria-border rounded-2xl p-5 shadow-sm space-y-4">
-          <div className="flex items-center space-x-2 border-b border-ria-border pb-3">
-            <span className="text-ria-neon text-lg">💬</span>
-            <h3 className="text-sm font-black uppercase tracking-wide">
-              Interaction <span className="text-ria-neon">coaching</span>
-            </h3>
-          </div>
+            {/* 2. CALENDRIER SÉANCES (résumé 2 semaines) */}
+            <section className="bg-white border border-ria-border rounded-2xl p-5 shadow-sm space-y-4">
+              <div className="flex justify-between items-center border-b border-ria-border pb-3">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wide">
+                    Calendrier <span className="text-ria-neon">séances</span>
+                  </h3>
+                  <p className="text-[11px] text-ria-sub font-mono">
+                    2 semaines de visibilité · Auto-génération le dimanche
+                  </p>
+                </div>
+                <div className="flex bg-ria-bg border border-ria-border rounded-lg p-1 text-[11px] font-semibold">
+                  <button
+                    onClick={() => setActiveWeek('N')}
+                    className={`px-3 py-1 rounded-md transition-all ${activeWeek === 'N' ? 'bg-ria-neon text-white' : 'text-ria-sub hover:text-ria-darkText'}`}
+                  >
+                    Semaine N
+                  </button>
+                  <button
+                    onClick={() => setActiveWeek('N+1')}
+                    className={`px-3 py-1 rounded-md transition-all ${activeWeek === 'N+1' ? 'bg-ria-neon text-white' : 'text-ria-sub hover:text-ria-darkText'}`}
+                  >
+                    Semaine N+1
+                  </button>
+                </div>
+              </div>
 
-          <div className="max-h-80 overflow-y-auto space-y-3 p-2">
-            {messages.map((msg, idx) => (
-              <div key={idx} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div
-                  className={`max-w-[90%] rounded-2xl px-4 py-3 text-xs leading-relaxed ${
-                    msg.sender === 'user'
-                      ? 'bg-ria-neon text-white font-semibold'
-                      : 'bg-ria-bg border border-ria-border text-ria-darkText'
-                  }`}
+              <div className="space-y-2">
+                {workouts[activeWeek].map((w) => (
+                  <div
+                    key={w.id}
+                    className="bg-ria-bg border border-ria-border hover:border-ria-neon/40 rounded-xl p-3 flex flex-col md:flex-row md:items-center justify-between transition-all space-y-2 md:space-y-0"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className="w-16 text-[11px] font-bold text-ria-sub uppercase">{w.day}</div>
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs font-bold">{w.title}</span>
+                          {w.modified && (
+                            <span className="bg-amber-100 text-amber-700 border border-amber-200 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                              MODIFIÉ VIA CHAT
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-ria-sub">{w.desc}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-3 text-[11px] font-mono self-end md:self-auto">
+                      <span className="bg-white px-2 py-1 rounded-md border border-ria-border text-ria-sub">{w.type}</span>
+                      <span className="text-ria-sub">{w.duration}</span>
+                      <span className="text-ria-neon font-bold">{w.intensity}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* 3. CHAT COACH */}
+            <section className="bg-white border border-ria-border rounded-2xl p-5 shadow-sm space-y-4">
+              <div className="flex items-center space-x-2 border-b border-ria-border pb-3">
+                <span className="text-ria-neon text-lg">💬</span>
+                <h3 className="text-sm font-black uppercase tracking-wide">
+                  Interaction <span className="text-ria-neon">coaching</span>
+                </h3>
+              </div>
+
+              <div className="max-h-80 overflow-y-auto space-y-3 p-2">
+                {messages.map((msg, idx) => (
+                  <div key={idx} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      className={`max-w-[90%] rounded-2xl px-4 py-3 text-xs leading-relaxed ${
+                        msg.sender === 'user'
+                          ? 'bg-ria-neon text-white font-semibold'
+                          : 'bg-ria-bg border border-ria-border text-ria-darkText'
+                      }`}
+                    >
+                      {msg.sender === 'coach' ? formatCoachResponse(msg.text) : msg.text}
+                    </div>
+                  </div>
+                ))}
+                {loading && <div className="text-xs font-mono text-ria-neon animate-pulse">Coach en train d'analyser...</div>}
+                <div ref={chatEndRef} />
+              </div>
+
+              <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex space-x-2">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Ex: 'Décale la séance vélo de samedi à dimanche' ou 'J'ai mal au mollet'"
+                  className="flex-1 bg-ria-bg border border-ria-border focus:border-ria-neon rounded-xl px-4 py-3 text-xs text-ria-darkText focus:outline-none placeholder:text-ria-sub"
+                />
+                <button
+                  type="submit"
+                  disabled={loading || !input.trim()}
+                  className="bg-ria-neon text-white font-black px-5 py-3 rounded-xl uppercase text-xs disabled:opacity-40"
                 >
-                  {msg.sender === 'coach' ? formatCoachResponse(msg.text) : msg.text}
-                </div>
-              </div>
-            ))}
-            {loading && <div className="text-xs font-mono text-ria-neon animate-pulse">Coach en train d'analyser...</div>}
-            <div ref={chatEndRef} />
-          </div>
-
-          <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex space-x-2">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ex: 'Décale la séance vélo de samedi à dimanche' ou 'J'ai mal au mollet'"
-              className="flex-1 bg-ria-bg border border-ria-border focus:border-ria-neon rounded-xl px-4 py-3 text-xs text-ria-darkText focus:outline-none placeholder:text-ria-sub"
-            />
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="bg-ria-neon text-white font-black px-5 py-3 rounded-xl uppercase text-xs disabled:opacity-40"
-            >
-              Envoyer
-            </button>
-          </form>
-        </section>
-
+                  Envoyer
+                </button>
+              </form>
+            </section>
+          </>
+        )}
       </main>
 
       {/* WIZARD ONBOARDING */}
