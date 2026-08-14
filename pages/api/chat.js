@@ -12,12 +12,8 @@ export default async function handler(req, res) {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey.trim());
-
-    // Force l'utilisation de l'API v1 au lieu de v1beta
-    const model = genAI.getGenerativeModel(
-      { model: "gemini-1.5-flash" },
-      { apiVersion: "v1" }
-    );
+    // Utilisation de l'alias canonique
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
     const prompt = `
 Tu es un coach expert en triathlon (format Sprint / D3).
