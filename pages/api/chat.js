@@ -17,7 +17,7 @@ Tu es un coach expert en triathlon (format Sprint / D3).
 Profil athlète :
 - Nom: ${profile?.name || 'Marin'}
 - Poids: ${profile?.weight || 90} kg
-- VMA: ${profile?.vma || 20} km/h | FTP: ${profile?.ftp || 549} W | Natation 100m: ${profile?.nat100 || '1:38'}
+- VMA: ${profile?.vma || 20} km/h | FTP: ${profile?.ftp || 350} W | Natation 100m: ${profile?.nat100 || '1:38'}
 - Style: Direct, exigeant, cash. Signale immédiatement le sur-entraînement et le volume poubelle.
 
 Règles strictes :
@@ -28,8 +28,8 @@ Message athlète : ${message}
 `;
 
   try {
-    // Utilisation directe du modèle exact validé par ton test : gemini-2.5-flash
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey.trim()}`;
+    // Emploi de l'alias dynamique "gemini-flash-latest" pour éviter la péremption d'un numéro de version
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey.trim()}`;
 
     const response = await fetch(url, {
       method: 'POST',
