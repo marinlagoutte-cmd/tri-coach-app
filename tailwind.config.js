@@ -8,13 +8,22 @@ module.exports = {
     extend: {
       colors: {
         ria: {
-          bg: '#F8FAFC',
-          border: '#E2E8F0',
+          bg: '#020617',
+          surface: '#0B1220',
+          border: '#1E293B',
           neon: '#FF5722',
           neonHover: '#E64A19',
           darkText: '#0F172A',
           sub: '#64748B',
+          sand: '#E8DCC8',
+          forest: '#1F4D3A',
+          ocean: '#0E3A53',
+          coral: '#FF6B4A',
         },
+      },
+      fontFamily: {
+        display: ['var(--font-display)', 'sans-serif'],
+        body: ['var(--font-body)', 'sans-serif'],
       },
       spacing: {
         'safe-b': 'env(safe-area-inset-bottom)',
