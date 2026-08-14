@@ -6,7 +6,7 @@ export default async function handler(req, res) {
 
   if (!apiKey) {
     return res.status(200).json({ 
-      reply: "⚠️ Clé API manquante. Ajoute GEMINI_API_KEY dans les Settings Vercel." 
+      reply: "⚠️ Clé API manquante dans Vercel." 
     });
   }
 
@@ -26,15 +26,18 @@ Règles strictes :
 Message athlète : ${message}
 `;
 
-    // Détection automatique du type de clé (AQ. = Bearer Token, sinon API Key classique)
-    const isBearer = apiKey.trim().startsWith('AQ.');
+    const cleanKey = apiKey.trim();
+    const isBearer = cleanKey.startsWith('AQ.');
+    
+    // Utilisation du nom de modèle officiel : gemini-1.5-flash-latest
+    const modelName = 'gemini-1.5-flash-latest';
     const url = isBearer
-      ? 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
-      : `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey.trim()}`;
+      ? `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`
+      : `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${cleanKey}`;
 
     const headers = { 'Content-Type': 'application/json' };
     if (isBearer) {
-      headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+      headers['Authorization'] = `Bearer ${cleanKey}`;
     }
 
     const response = await fetch(url, {
