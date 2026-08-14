@@ -1,17 +1,17 @@
 import { generatePlanWithAI } from '../../lib/gemini';
-import { ensureCompleteWorkouts, getIncompleteWorkouts } from '../../lib/workouts';
+import { ensureCompleteWorkouts, getIncompleteWorkouts, checkPlanCoherence } from '../../lib/workouts';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Méthode non autorisée' });
+    return res.status(405).json({ error: 'Méthode non autorisée' });
   }
-
   try {
-    const { wizardData, profile } = req.body;
-
+    const { wizardData, profile } = req.body || {};
     if (!wizardData?.targetDate || !profile) {
       return res.status(400).json({ error: 'wizardData et profile requis' });
     }
+
+    const coherenceWarnings = checkPlanCoherence(wizardData);
 
     const { trainingPlan, workouts } = await generatePlanWithAI({ wizardData, profile });
     const enriched = ensureCompleteWorkouts(workouts, profile);
@@ -21,6 +21,7 @@ export default async function handler(req, res) {
       trainingPlan,
       workouts: enriched,
       incompleteCount: incomplete.length,
+      coherenceWarnings,
     });
   } catch (error) {
     console.error('generate-plan error:', error);
