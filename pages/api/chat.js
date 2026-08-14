@@ -4,10 +4,9 @@ export default async function handler(req, res) {
   const { message, profile } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
 
-  // 1. Vérification de la clé API
   if (!apiKey) {
     return res.status(200).json({ 
-      reply: "⚠️ Clé API manquante. Ajoute GEMINI_API_KEY dans les Settings > Environment Variables de ton projet Vercel, puis clique sur Redeploy." 
+      reply: "⚠️ Clé API manquante. Ajoute GEMINI_API_KEY dans les Settings Vercel." 
     });
   }
 
@@ -27,10 +26,20 @@ Règles strictes :
 Message athlète : ${message}
 `;
 
-    // 2. Appel API Gemini
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+    // Détection automatique du type de clé (AQ. = Bearer Token, sinon API Key classique)
+    const isBearer = apiKey.trim().startsWith('AQ.');
+    const url = isBearer
+      ? 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
+      : `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey.trim()}`;
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (isBearer) {
+      headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+    }
+
+    const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }]
       })
