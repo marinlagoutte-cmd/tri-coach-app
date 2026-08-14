@@ -22,13 +22,13 @@ export default function CalendarView({ workouts }) {
               Semaine <span className="text-ria-neon">{weekKey === 'N' ? 'En cours (N)' : 'Suivante (N+1)'}</span>
             </h3>
             <span className="text-xs font-mono font-bold bg-ria-bg px-3 py-1 rounded-full border border-ria-border">
-              {workouts[weekKey]?.length || 0} séances
+              {workouts?.[weekKey]?.length || 0} séances
             </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
             {daysOfWeek.map((dayName) => {
-              const workout = workouts[weekKey]?.find((w) => w.day.toLowerCase() === dayName.toLowerCase());
+              const workout = workouts?.[weekKey]?.find((w) => w.day.toLowerCase() === dayName.toLowerCase());
 
               return (
                 <div
