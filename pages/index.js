@@ -1,439 +1,415 @@
-import React, { useMemo, useState } from 'react';
-import { checkPlanCoherence } from '../lib/workouts';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import CalendarView from '../components/CalendarView';
+import ChatMessage from '../components/ChatMessage';
+import WorkoutDetail from '../components/WorkoutDetail';
+import WizardModal from '../components/WizardModal';
+import { STORAGE_KEYS, loadFromStorage, saveToStorage } from '../lib/storage';
+import { DEFAULT_PROFILE, DEFAULT_TRAINING_PLAN, DEFAULT_WORKOUTS } from '../lib/defaults';
+import { computeRaceStats } from '../lib/workouts';
 
-const AVG_TIME_TABLE = {
-  running: {
-    '5km': { homme: '20 - 24 min', femme: '23 - 28 min' },
-    '10km': { homme: '42 - 50 min', femme: '48 - 58 min' },
-    'Semi-marathon': { homme: '1h35 - 1h50', femme: '1h50 - 2h05' },
-    Marathon: { homme: '3h30 - 4h00', femme: '3h55 - 4h30' },
-  },
-  triathlon: {
-    XS: '40 - 50 min',
-    S: '1h10 - 1h25',
-    M: '2h30 - 2h50',
-    L: '4h45 - 5h30',
-    XL: '10h00 - 12h00',
-  },
+const TABS = [
+  { id: 'calendar', label: 'Calendrier', icon: '📅' },
+  { id: 'objective', label: 'Objectif', icon: '🎯' },
+  { id: 'profile', label: 'Profil', icon: '⚙️' },
+  { id: 'chat', label: 'Coach Chat', icon: '💬' },
+];
+
+const SPORT_FILTERS = [
+  { id: 'ALL', label: 'Tout' },
+  { id: 'NATATION', label: 'Nat' },
+  { id: 'CYCLISME', label: 'Vélo' },
+  { id: 'C.A.P', label: 'CAP' },
+];
+
+const WELCOME_MESSAGE = {
+  sender: 'coach',
+  text: "👋 Salut Marin ! Ton plan d'entraînement est opérationnel. Quelle séance souhaites-tu passer en revue ?",
 };
 
-export default function WizardModal({ isOpen, onClose, onComplete, submitting = false, submitError = null }) {
-  const [step, setStep] = useState(1);
-  const [formData, setFormData] = useState({
-    eventName: '',
-    gender: 'homme',
-    weight: '',
-    fitnessLevel: 3,
-    sportType: 'running', // 'running' | 'triathlon'
+export default function Home() {
+  const [activeTab, setActiveTab] = useState('calendar');
+  const [activeWeek, setActiveWeek] = useState('N');
+  const [sportFilter, setSportFilter] = useState('ALL');
 
-    runningSubtype: 'road', // 'road' | 'trail'
-    distance: '10km',
-    trailKm: '',
-    trailElevation: '',
-    triathlonFormat: 'M',
-    customDistances: { swim: 1.5, bike: 40, run: 10 },
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [trainingPlan, setTrainingPlan] = useState(DEFAULT_TRAINING_PLAN);
+  const [workouts, setWorkouts] = useState(DEFAULT_WORKOUTS);
 
-    targetTime: '',
-    triathlonTimes: { swim: '', transition: '', bike: '', total: '' },
+  const [showWizard, setShowWizard] = useState(false);
+  const [wizardSubmitting, setWizardSubmitting] = useState(false);
+  const [wizardError, setWizardError] = useState(null);
 
-    targetDate: '',
-    hoursPerWeek: 8,
-    maxSessionsPerWeek: 4,
-    offDays: 'Mercredi',
-  });
+  const [selectedWorkout, setSelectedWorkout] = useState(null);
 
-  const coherenceWarnings = useMemo(() => checkPlanCoherence(formData), [formData]);
+  const [messages, setMessages] = useState([WELCOME_MESSAGE]);
+  const [inputMessage, setInputMessage] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef(null);
 
-  if (!isOpen) return null;
+  const [hydrated, setHydrated] = useState(false);
 
-  const getAverageTimeIndicator = () => {
-    if (formData.sportType === 'running') {
-      return AVG_TIME_TABLE.running[formData.distance]?.[formData.gender] || 'Variable selon niveau';
+  // --- CHARGEMENT INITIAL DEPUIS LE STOCKAGE LOCAL ---
+  useEffect(() => {
+    setProfile(loadFromStorage(STORAGE_KEYS.profile, DEFAULT_PROFILE));
+    setTrainingPlan(loadFromStorage(STORAGE_KEYS.plan, DEFAULT_TRAINING_PLAN));
+    setWorkouts(loadFromStorage(STORAGE_KEYS.workouts, DEFAULT_WORKOUTS));
+    setMessages(loadFromStorage(STORAGE_KEYS.chat, [WELCOME_MESSAGE]));
+    setHydrated(true);
+  }, []);
+
+  // --- PERSISTANCE (uniquement après hydratation pour ne pas écraser avec les valeurs par défaut) ---
+  useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.profile, profile); }, [profile, hydrated]);
+  useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.plan, trainingPlan); }, [trainingPlan, hydrated]);
+  useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.workouts, workouts); }, [workouts, hydrated]);
+  useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.chat, messages); }, [messages, hydrated]);
+
+  useEffect(() => {
+    if (activeTab === 'chat') {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-    return AVG_TIME_TABLE.triathlon[formData.triathlonFormat] || 'Variable selon niveau';
+  }, [messages, activeTab]);
+
+  const raceStats = useMemo(() => computeRaceStats(trainingPlan), [trainingPlan]);
+
+  const filteredWorkouts = useMemo(() => {
+    const list = workouts[activeWeek] || [];
+    if (sportFilter === 'ALL') return list;
+    return list.filter((w) => w.type?.toUpperCase().includes(sportFilter));
+  }, [workouts, activeWeek, sportFilter]);
+
+  const handleProfileFieldChange = (key, value) => {
+    setProfile((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleNext = () => setStep((s) => Math.min(4, s + 1));
-  const handlePrev = () => setStep((s) => Math.max(1, s - 1));
+  // --- GÉNÉRATION D'UN NOUVEAU PLAN VIA L'ASSISTANT ---
+  const handleWizardComplete = async (wizardData) => {
+    setWizardSubmitting(true);
+    setWizardError(null);
+    try {
+      const res = await fetch('/api/generate-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wizardData, profile }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur lors de la génération du plan.');
 
-  const handleSubmit = () => {
-    if (submitting) return;
-    if (onComplete) onComplete(formData);
-    // Parent decides when to close (after success), so it can show errors otherwise.
+      setTrainingPlan(data.trainingPlan);
+      setWorkouts(data.workouts);
+      setShowWizard(false);
+      setActiveTab('calendar');
+
+      const coachMsg = `🎯 **Nouveau plan généré !**\n\n- **Objectif** : ${data.trainingPlan?.title || wizardData.eventName || 'Nouvel objectif'}\n- **Volume hebdo** : ~${wizardData.hoursPerWeek}h/semaine sur ${wizardData.maxSessionsPerWeek} séances\n\nLes semaines N et N+1 ont été calées sur tes métriques actuelles.`;
+      setMessages((prev) => [...prev, { sender: 'coach', text: coachMsg }]);
+
+      if (data.coherenceWarnings?.length) {
+        setMessages((prev) => [
+          ...prev,
+          { sender: 'coach', text: `⚠️ ${data.coherenceWarnings.join(' ')}` },
+        ]);
+      }
+    } catch (err) {
+      setWizardError(err.message || 'Erreur lors de la génération du plan.');
+    } finally {
+      setWizardSubmitting(false);
+    }
   };
 
-  const stepIsValid = () => {
-    if (step === 1) return Boolean(formData.weight);
-    if (step === 4) return Boolean(formData.targetDate) && Number(formData.hoursPerWeek) > 0 && Number(formData.maxSessionsPerWeek) > 0;
-    return true;
+  // --- CHAT AVEC LE COACH IA ---
+  const handleSendMessage = async (e) => {
+    e?.preventDefault();
+    if (!inputMessage.trim() || chatLoading) return;
+
+    const userText = inputMessage;
+    const newHistory = [...messages, { sender: 'user', text: userText }];
+    setMessages(newHistory);
+    setInputMessage('');
+    setChatLoading(true);
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userText, profile, workouts, trainingPlan }),
+      });
+      const data = await res.json();
+
+      if (data.updatedWorkouts) setWorkouts(data.updatedWorkouts);
+      setMessages([...newHistory, { sender: 'coach', text: data.reply || "J'ai bien pris en compte ta demande." }]);
+    } catch (err) {
+      setMessages([
+        ...newHistory,
+        { sender: 'coach', text: '⚠️ Erreur lors de la réponse du coach. Vérifie la connexion backend.' },
+      ]);
+    } finally {
+      setChatLoading(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-6 text-slate-100 max-h-[90vh] overflow-y-auto">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col pb-20 md:pb-6 antialiased">
 
-        <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-          <div>
-            <span className="text-[10px] font-mono text-orange-400 uppercase tracking-widest block">Assistant de création</span>
-            <h2 className="text-lg font-bold">Configuration de ton plan d'entraînement</h2>
+      {/* HEADER */}
+      <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center space-x-2">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-orange-500 to-indigo-600 flex items-center justify-center font-black text-xs text-white shadow-lg shadow-orange-500/20">
+            TC
           </div>
-          <span className="text-xs font-mono text-slate-500 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
-            Étape {step} / 4
-          </span>
+          <h1 className="text-sm font-black tracking-tight text-white flex items-center gap-1.5">
+            TRI<span className="text-orange-500">COACH</span>
+          </h1>
         </div>
 
-        <div className="space-y-4">
+        <button
+          onClick={() => { setWizardError(null); setShowWizard(true); }}
+          className="text-xs font-bold bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 text-white px-3 py-1.5 rounded-xl shadow-md transition-all flex items-center gap-1 active:scale-95"
+        >
+          <span>+</span>
+          <span className="hidden sm:inline">Nouveau</span> Plan
+        </button>
+      </header>
 
-          {/* ÉTAPE 1 : Profil & Discipline */}
-          {step === 1 && (
-            <div className="space-y-4">
-              <h3 className="text-xs font-black uppercase tracking-wide text-orange-400">1. Profil & discipline</h3>
+      {/* ONGLETS */}
+      <nav className="bg-slate-900 border-b border-slate-800 sticky top-[53px] z-20 px-2 py-2">
+        <div className="max-w-md mx-auto grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800/80">
+          {TABS.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[11px] font-bold transition-all ${
+                  isActive
+                    ? 'bg-slate-800 text-orange-400 border border-slate-700 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'
+                }`}
+              >
+                <span className="text-base mb-0.5">{tab.icon}</span>
+                <span className="truncate w-full text-center">{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
 
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Nom de l'objectif (optionnel)</label>
-                <input
-                  type="text"
-                  value={formData.eventName}
-                  onChange={(e) => setFormData({ ...formData, eventName: e.target.value })}
-                  placeholder="ex: Marathon de Paris"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white"
-                />
-              </div>
+      <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4">
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Genre</label>
-                  <select
-                    value={formData.gender}
-                    onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white"
-                  >
-                    <option value="homme">Homme</option>
-                    <option value="femme">Femme</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Poids (kg)</label>
-                  <input
-                    type="number"
-                    value={formData.weight}
-                    onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
-                    placeholder="ex: 72"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white font-mono"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">
-                  Niveau de condition physique (1 = Débutant, 5 = Expert) : <strong className="text-orange-400">{formData.fitnessLevel}/5</strong>
-                </label>
-                <input
-                  type="range"
-                  min="1"
-                  max="5"
-                  step="1"
-                  value={formData.fitnessLevel}
-                  onChange={(e) => setFormData({ ...formData, fitnessLevel: Number(e.target.value) })}
-                  className="w-full accent-orange-500 cursor-pointer"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Discipline principale</label>
-                <div className="grid grid-cols-2 gap-2">
+        {/* ONGLET CALENDRIER */}
+        {activeTab === 'calendar' && (
+          <div className="space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono text-slate-400 uppercase tracking-wider font-semibold">
+                  Sélecteur de semaine
+                </span>
+                <div className="flex bg-slate-950 border border-slate-800 rounded-xl p-0.5">
                   <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, sportType: 'running' })}
-                    className={`p-3 rounded-xl border text-xs font-bold text-left transition-all min-h-tap ${
-                      formData.sportType === 'running'
+                    onClick={() => setActiveWeek('N')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                      activeWeek === 'N' ? 'bg-orange-500 text-white' : 'text-slate-400'
+                    }`}
+                  >
+                    Semaine N
+                  </button>
+                  <button
+                    onClick={() => setActiveWeek('N+1')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                      activeWeek === 'N+1' ? 'bg-orange-500 text-white' : 'text-slate-400'
+                    }`}
+                  >
+                    Semaine N+1
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex gap-1.5 overflow-x-auto">
+                {SPORT_FILTERS.map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setSportFilter(f.id)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap border transition-all ${
+                      sportFilter === f.id
                         ? 'bg-orange-500/10 border-orange-500 text-orange-400'
                         : 'bg-slate-950 border-slate-800 text-slate-400'
                     }`}
                   >
-                    🏃‍♂️ Course à pied
+                    {f.label}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, sportType: 'triathlon' })}
-                    className={`p-3 rounded-xl border text-xs font-bold text-left transition-all min-h-tap ${
-                      formData.sportType === 'triathlon'
-                        ? 'bg-orange-500/10 border-orange-500 text-orange-400'
-                        : 'bg-slate-950 border-slate-800 text-slate-400'
-                    }`}
-                  >
-                    🏊‍♂️🚴‍♂️🏃‍♂️ Triathlon
-                  </button>
-                </div>
+                ))}
               </div>
             </div>
-          )}
 
-          {/* ÉTAPE 2 : Spécificités selon la discipline choisie */}
-          {step === 2 && (
-            <div className="space-y-4">
-              {formData.sportType === 'running' ? (
-                <div className="space-y-3">
-                  <h3 className="text-xs font-black uppercase tracking-wide text-orange-400">2. Format course à pied</h3>
+            <CalendarView
+              weekKey={activeWeek}
+              workouts={filteredWorkouts}
+              onSelectWorkout={setSelectedWorkout}
+            />
+          </div>
+        )}
 
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, runningSubtype: 'road' })}
-                      className={`px-3 py-1.5 rounded-lg border text-xs min-h-tap ${formData.runningSubtype === 'road' ? 'bg-slate-800 text-white border-slate-700' : 'text-slate-500 border-slate-900'}`}
-                    >
-                      Route
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, runningSubtype: 'trail' })}
-                      className={`px-3 py-1.5 rounded-lg border text-xs min-h-tap ${formData.runningSubtype === 'trail' ? 'bg-slate-800 text-white border-slate-700' : 'text-slate-500 border-slate-900'}`}
-                    >
-                      Trail
-                    </button>
-                  </div>
+        {/* ONGLET OBJECTIF */}
+        {activeTab === 'objective' && (
+          <div className="space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+              <span className="text-[10px] font-mono text-orange-400 uppercase tracking-widest block">Objectif en cours</span>
+              <h2 className="text-lg font-black text-white">{trainingPlan.title}</h2>
+              <p className="text-xs text-slate-400 font-mono">{trainingPlan.date}</p>
 
-                  {formData.runningSubtype === 'road' ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      {['5km', '10km', 'Semi-marathon', 'Marathon'].map((dist) => (
-                        <button
-                          key={dist}
-                          type="button"
-                          onClick={() => setFormData({ ...formData, distance: dist })}
-                          className={`p-3 rounded-xl border text-xs font-mono font-bold min-h-tap ${formData.distance === dist ? 'bg-orange-500 text-slate-950 border-orange-400' : 'bg-slate-950 text-slate-300 border-slate-800'}`}
-                        >
-                          {dist}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-slate-500 block mb-1">Distance (km)</label>
-                        <input
-                          type="number"
-                          placeholder="ex: 45"
-                          value={formData.trailKm}
-                          onChange={(e) => setFormData({ ...formData, trailKm: e.target.value })}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-slate-500 block mb-1">Dénivelé positif (D+ m)</label>
-                        <input
-                          type="number"
-                          placeholder="ex: 2500"
-                          value={formData.trailElevation}
-                          onChange={(e) => setFormData({ ...formData, trailElevation: e.target.value })}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white font-mono"
-                        />
-                      </div>
-                    </div>
-                  )}
+              <div className="grid grid-cols-3 gap-2 text-center pt-2">
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+                  <span className="text-[9px] text-slate-500 uppercase block">Jours restants</span>
+                  <span className="text-base font-black text-orange-400 font-mono">{raceStats.daysLeft}</span>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  <h3 className="text-xs font-black uppercase tracking-wide text-orange-400">2. Format triathlon</h3>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+                  <span className="text-[9px] text-slate-500 uppercase block">Semaines</span>
+                  <span className="text-base font-black text-white font-mono">{raceStats.weeksLeft}</span>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+                  <span className="text-[9px] text-slate-500 uppercase block">Progression</span>
+                  <span className="text-base font-black text-indigo-400 font-mono">{raceStats.progressPct}%</span>
+                </div>
+              </div>
 
-                  <div className="grid grid-cols-5 gap-1.5">
-                    {['XS', 'S', 'M', 'L', 'XL'].map((fmt) => (
-                      <button
-                        key={fmt}
-                        type="button"
-                        onClick={() => {
-                          let d = { swim: 0.75, bike: 20, run: 5 };
-                          if (fmt === 'S') d = { swim: 0.75, bike: 20, run: 5 };
-                          if (fmt === 'M') d = { swim: 1.5, bike: 40, run: 10 };
-                          if (fmt === 'L') d = { swim: 1.9, bike: 90, run: 21.1 };
-                          if (fmt === 'XL') d = { swim: 3.8, bike: 180, run: 42.2 };
-                          setFormData({ ...formData, triathlonFormat: fmt, customDistances: d });
-                        }}
-                        className={`py-2 rounded-xl border text-xs font-mono font-bold text-center min-h-tap ${formData.triathlonFormat === fmt ? 'bg-orange-500 text-slate-950 border-orange-400' : 'bg-slate-950 text-slate-300 border-slate-800'}`}
-                      >
-                        {fmt}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2 text-xs">
-                    <span className="text-[10px] text-slate-500 uppercase font-mono block">Ajustement fin des distances (km)</span>
-                    <div className="grid grid-cols-3 gap-2 font-mono">
-                      <div>
-                        <span className="text-[9px] text-cyan-400 block">Natation</span>
-                        <input type="number" step="0.1" value={formData.customDistances.swim} onChange={(e) => setFormData({ ...formData, customDistances: { ...formData.customDistances, swim: Number(e.target.value) } })} className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white text-center" />
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-amber-400 block">Vélo</span>
-                        <input type="number" step="1" value={formData.customDistances.bike} onChange={(e) => setFormData({ ...formData, customDistances: { ...formData.customDistances, bike: Number(e.target.value) } })} className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white text-center" />
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-emerald-400 block">Course</span>
-                        <input type="number" step="0.5" value={formData.customDistances.run} onChange={(e) => setFormData({ ...formData, customDistances: { ...formData.customDistances, run: Number(e.target.value) } })} className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white text-center" />
-                      </div>
-                    </div>
-                  </div>
+              {trainingPlan.splits && (
+                <div className="grid grid-cols-3 gap-2 text-center pt-1 text-[11px] font-mono">
+                  <div><span className="text-cyan-400 block">🏊 {trainingPlan.splits.nat}</span></div>
+                  <div><span className="text-amber-400 block">🚴 {trainingPlan.splits.bike}</span></div>
+                  <div><span className="text-emerald-400 block">🏃 {trainingPlan.splits.run}</span></div>
                 </div>
               )}
             </div>
-          )}
 
-          {/* ÉTAPE 3 : Objectif de temps & prédiction */}
-          {step === 3 && (
-            <div className="space-y-4">
-              <h3 className="text-xs font-black uppercase tracking-wide text-orange-400">3. Objectif & prédiction de temps</h3>
-
-              <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl text-xs space-y-1">
-                <span className="text-[10px] text-slate-500 uppercase block font-mono">💡 Indicateur de référence moyen ({formData.gender})</span>
-                <p className="text-slate-300">
-                  Temps moyen estimé : <strong className="text-orange-400 font-mono">{getAverageTimeIndicator()}</strong>
-                </p>
-              </div>
-
-              {formData.sportType === 'triathlon' ? (
-                <div className="space-y-2">
-                  <label className="text-[10px] text-slate-400 block">Temps visé par discipline (hh:mm)</label>
-                  <div className="grid grid-cols-3 gap-2 font-mono text-xs">
-                    <input type="text" placeholder="Nat (ex: 30m)" value={formData.triathlonTimes.swim} onChange={(e) => setFormData({ ...formData, triathlonTimes: { ...formData.triathlonTimes, swim: e.target.value } })} className="bg-slate-950 border border-slate-800 p-2 rounded-xl text-white text-center" />
-                    <input type="text" placeholder="Transits" value={formData.triathlonTimes.transition} onChange={(e) => setFormData({ ...formData, triathlonTimes: { ...formData.triathlonTimes, transition: e.target.value } })} className="bg-slate-950 border border-slate-800 p-2 rounded-xl text-white text-center" />
-                    <input type="text" placeholder="Vélo (ex: 1h15)" value={formData.triathlonTimes.bike} onChange={(e) => setFormData({ ...formData, triathlonTimes: { ...formData.triathlonTimes, bike: e.target.value } })} className="bg-slate-950 border border-slate-800 p-2 rounded-xl text-white text-center" />
+            {trainingPlan.cycles?.length > 0 && (
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
+                <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest block mb-1">Macrocycles</span>
+                {trainingPlan.cycles.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs">
+                    <div>
+                      <p className="font-bold text-white">{c.name}</p>
+                      <p className="text-slate-500 font-mono text-[10px]">{c.dates}</p>
+                    </div>
+                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
+                      c.status === 'En cours' ? 'bg-orange-500/10 border-orange-500 text-orange-400' :
+                      c.status === 'Terminé' ? 'bg-emerald-950 border-emerald-800 text-emerald-400' :
+                      'bg-slate-900 border-slate-800 text-slate-500'
+                    }`}>
+                      {c.status}
+                    </span>
                   </div>
-                  <input type="text" placeholder="Temps global visé (ex: 2h35)" value={formData.triathlonTimes.total} onChange={(e) => setFormData({ ...formData, triathlonTimes: { ...formData.triathlonTimes, total: e.target.value } })} className="w-full bg-slate-950 border border-slate-800 p-2.5 rounded-xl text-white text-center font-mono text-xs" />
-                </div>
-              ) : (
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Chrono cible visé</label>
-                  <input
-                    type="text"
-                    placeholder="ex: 42 min ou 1h35"
-                    value={formData.targetTime}
-                    onChange={(e) => setFormData({ ...formData, targetTime: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white font-mono"
-                  />
-                </div>
-              )}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
-          {/* ÉTAPE 4 : Date, disponibilités & cohérence */}
-          {step === 4 && (
-            <div className="space-y-4">
-              <h3 className="text-xs font-black uppercase tracking-wide text-orange-400">4. Date & disponibilités</h3>
+        {/* ONGLET PROFIL */}
+        {activeTab === 'profile' && (
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+            <span className="text-[10px] font-mono text-orange-400 uppercase tracking-widest block">Profil physiologique</span>
 
+            <div className="grid grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="text-xs text-slate-400 block mb-1">Date de l'objectif</label>
+                <label className="block text-slate-400 font-mono mb-1">VMA (km/h)</label>
                 <input
-                  type="date"
-                  value={formData.targetDate}
-                  onChange={(e) => setFormData({ ...formData, targetDate: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white font-mono"
+                  type="number"
+                  step="0.1"
+                  value={profile.vma}
+                  onChange={(e) => handleProfileFieldChange('vma', Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono font-bold focus:border-orange-500 focus:outline-none"
                 />
               </div>
-
               <div>
-                <label className="text-xs text-slate-400 block mb-1">
-                  Volume horaire hebdo disponible : <strong className="text-orange-400 font-mono">{formData.hoursPerWeek} h</strong>
-                </label>
+                <label className="block text-slate-400 font-mono mb-1">FTP (W)</label>
                 <input
-                  type="range"
-                  min="2"
-                  max="20"
-                  step="0.5"
-                  value={formData.hoursPerWeek}
-                  onChange={(e) => setFormData({ ...formData, hoursPerWeek: Number(e.target.value) })}
-                  className="w-full accent-orange-500 cursor-pointer"
+                  type="number"
+                  value={profile.ftp}
+                  onChange={(e) => handleProfileFieldChange('ftp', Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono font-bold focus:border-orange-500 focus:outline-none"
                 />
               </div>
-
               <div>
-                <label className="text-xs text-slate-400 block mb-1">
-                  Nombre de séances par semaine : <strong className="text-orange-400 font-mono">{formData.maxSessionsPerWeek} séances</strong>
-                </label>
-                <input
-                  type="range"
-                  min="2"
-                  max="12"
-                  step="1"
-                  value={formData.maxSessionsPerWeek}
-                  onChange={(e) => setFormData({ ...formData, maxSessionsPerWeek: Number(e.target.value) })}
-                  className="w-full accent-orange-500 cursor-pointer"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Jour(s) de repos obligatoire</label>
+                <label className="block text-slate-400 font-mono mb-1">CSS natation (/100m)</label>
                 <input
                   type="text"
-                  value={formData.offDays}
-                  onChange={(e) => setFormData({ ...formData, offDays: e.target.value })}
-                  placeholder="ex: Mercredi"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white"
+                  value={profile.nat100}
+                  onChange={(e) => handleProfileFieldChange('nat100', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono font-bold focus:border-orange-500 focus:outline-none"
                 />
               </div>
-
-              {/* Vérification de cohérence heures/séances + format */}
-              {coherenceWarnings.length > 0 && (
-                <div className="bg-rose-950/50 border border-rose-800/80 p-3 rounded-xl text-xs text-rose-300 space-y-1.5">
-                  <span className="font-bold block font-mono">⚠️ Alerte de cohérence :</span>
-                  {coherenceWarnings.map((w, i) => (
-                    <p key={i} className="leading-relaxed">{w}</p>
-                  ))}
-                </div>
-              )}
-
-              {submitError && (
-                <div className="bg-rose-950/50 border border-rose-800/80 p-3 rounded-xl text-xs text-rose-300">
-                  {submitError}
-                </div>
-              )}
+              <div>
+                <label className="block text-slate-400 font-mono mb-1">Poids (kg)</label>
+                <input
+                  type="number"
+                  value={profile.weight}
+                  onChange={(e) => handleProfileFieldChange('weight', Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono font-bold focus:border-orange-500 focus:outline-none"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-slate-400 font-mono mb-1">FC Max (bpm)</label>
+                <input
+                  type="number"
+                  value={profile.fcMax}
+                  onChange={(e) => handleProfileFieldChange('fcMax', Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono font-bold focus:border-orange-500 focus:outline-none"
+                />
+              </div>
             </div>
-          )}
 
-        </div>
+            {profile.ftp && profile.weight ? (
+              <div className="bg-indigo-950/40 border border-indigo-500/30 p-3 rounded-xl text-[11px] text-indigo-300">
+                ⚡ Rapport Poids/Puissance : <strong>{(profile.ftp / profile.weight).toFixed(2)} W/kg</strong>
+              </div>
+            ) : null}
+          </div>
+        )}
 
-        <div className="flex justify-between items-center border-t border-slate-800 pt-4">
-          {step > 1 ? (
-            <button
-              type="button"
-              onClick={handlePrev}
-              disabled={submitting}
-              className="px-4 py-2 rounded-xl border border-slate-800 text-xs text-slate-400 hover:text-white min-h-tap disabled:opacity-50"
-            >
-              Retour
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={submitting}
-              className="px-4 py-2 rounded-xl border border-slate-800 text-xs text-slate-400 hover:text-white min-h-tap disabled:opacity-50"
-            >
-              Annuler
-            </button>
-          )}
+        {/* ONGLET CHAT */}
+        {activeTab === 'chat' && (
+          <div className="space-y-3 flex flex-col h-[calc(100vh-170px)]">
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {messages.map((m, idx) => (
+                <ChatMessage key={idx} text={m.text} sender={m.sender} />
+              ))}
+              {chatLoading && (
+                <div className="text-xs font-mono text-orange-400 animate-pulse flex items-center gap-2">
+                  <span>🤖</span> Coach analyse et recalcule tes cibles...
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
 
-          {step < 4 ? (
-            <button
-              type="button"
-              onClick={handleNext}
-              disabled={!stepIsValid()}
-              className="px-5 py-2 rounded-xl bg-orange-500 text-slate-950 font-bold text-xs hover:bg-orange-400 transition-colors min-h-tap disabled:opacity-40"
-            >
-              Suivant
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={submitting || !stepIsValid()}
-              className="px-5 py-2 rounded-xl bg-orange-500 text-slate-950 font-bold text-xs hover:bg-orange-400 transition-colors min-h-tap disabled:opacity-60 flex items-center gap-2"
-            >
-              {submitting && <span className="w-3 h-3 border-2 border-slate-950/40 border-t-slate-950 rounded-full animate-spin" />}
-              {submitting ? 'Génération en cours…' : 'Générer mon plan'}
-            </button>
-          )}
-        </div>
+            <form onSubmit={handleSendMessage} className="flex space-x-2 pt-2">
+              <input
+                type="text"
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                placeholder="Ex: Décale ma séance de vélo à jeudi..."
+                className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:border-orange-500 focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={chatLoading}
+                className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md active:scale-95"
+              >
+                Envoyer
+              </button>
+            </form>
+          </div>
+        )}
 
-      </div>
+      </main>
+
+      <WizardModal
+        isOpen={showWizard}
+        onClose={() => setShowWizard(false)}
+        onComplete={handleWizardComplete}
+        submitting={wizardSubmitting}
+        submitError={wizardError}
+      />
+
+      <WorkoutDetail workout={selectedWorkout} onClose={() => setSelectedWorkout(null)} />
+
     </div>
   );
 }
