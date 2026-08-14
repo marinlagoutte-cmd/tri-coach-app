@@ -87,63 +87,118 @@ export default function Home() {
     }
   };
 
-  // Convertisseur sommaire de tableaux Markdown vers HTML propre avec style Ultra Tour de l'Aria
+  // Convertisseur de tableaux Markdown vers composant réactif aux couleurs UTR
   const formatCoachResponse = (text) => {
-    return text.split('\n').map((line, i) => {
-      // Détection des lignes de tableaux Markdown
-      if (line.trim().startsWith('|')) {
-        const cells = line.split('|').filter((cell) => cell.trim() !== '');
-        if (line.includes('---')) return null; // Ignore les séparateurs Markdown (---)
+    const lines = text.split('\n');
+    const elements = [];
+    let tableRows = [];
+    let inTable = false;
 
-        const isHeader = i > 0 && text.split('\n')[i - 1]?.includes('---') === false && i < 3;
+    lines.forEach((line, i) => {
+      const trimmed = line.trim();
 
-        return (
-          <div key={i} className="grid grid-cols-4 gap-1 text-xs py-1.5 border-b border-ria-border font-mono">
-            {cells.map((c, cellIdx) => (
-              <div
-                key={cellIdx}
-                className={`${
-                  isHeader
-                    ? 'text-ria-neon font-bold uppercase text-[10px]'
-                    : 'text-gray-200'
-                } px-1 overflow-hidden text-ellipsis`}
-              >
-                {c.trim()}
-              </div>
-            ))}
-          </div>
-        );
+      if (trimmed.startsWith('|')) {
+        inTable = true;
+        if (!trimmed.includes('---')) {
+          const cells = trimmed.split('|').filter(c => c.trim() !== '');
+          tableRows.push(cells);
+        }
+      } else {
+        if (inTable && tableRows.length > 0) {
+          const headers = tableRows[0];
+          const body = tableRows.slice(1);
+
+          elements.push(
+            <div key={`table-${i}`} className="my-3 overflow-x-auto rounded-xl border border-ria-border bg-ria-bg p-1">
+              <table className="w-full text-left border-collapse min-w-[320px]">
+                <thead>
+                  <tr className="border-b border-ria-border bg-ria-card">
+                    {headers.map((h, idx) => (
+                      <th key={idx} className="p-2 text-[11px] font-black uppercase text-ria-neon font-mono">
+                        {h.trim()}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ria-border/50 text-xs">
+                  {body.map((row, rIdx) => (
+                    <tr key={rIdx} className="hover:bg-ria-card/40 transition-colors">
+                      {row.map((cell, cIdx) => (
+                        <td key={cIdx} className="p-2 text-gray-200 font-mono text-[11px]">
+                          {cell.trim()}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+          tableRows = [];
+          inTable = false;
+        }
+
+        if (trimmed.startsWith('#') || trimmed.startsWith('**')) {
+          elements.push(
+            <p key={i} className="font-bold text-ria-neon mt-3 mb-1 uppercase text-xs tracking-wider">
+              {trimmed.replace(/[#*]/g, '').trim()}
+            </p>
+          );
+        } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+          elements.push(
+            <li key={i} className="ml-4 text-xs text-gray-300 list-disc my-0.5">
+              {trimmed.replace(/^[-*]\s*/, '')}
+            </li>
+          );
+        } else if (trimmed) {
+          elements.push(
+            <p key={i} className="my-1 text-xs text-gray-200 leading-relaxed">
+              {trimmed}
+            </p>
+          );
+        }
       }
-
-      // Formatage des titres ou listes
-      if (line.startsWith('#') || line.startsWith('**')) {
-        return (
-          <p key={i} className="font-bold text-ria-neon mt-3 mb-1 uppercase text-xs tracking-wider">
-            {line.replace(/[#*]/g, '').trim()}
-          </p>
-        );
-      }
-
-      if (line.startsWith('- ') || line.startsWith('* ')) {
-        return (
-          <li key={i} className="ml-4 text-xs text-gray-300 list-disc my-0.5">
-            {line.replace(/^[-*]\s*/, '')}
-          </li>
-        );
-      }
-
-      return line.trim() ? (
-        <p key={i} className="my-1 text-xs text-gray-200 leading-relaxed">
-          {line}
-        </p>
-      ) : null;
     });
+
+    if (inTable && tableRows.length > 0) {
+      const headers = tableRows[0];
+      const body = tableRows.slice(1);
+
+      elements.push(
+        <div key="table-end" className="my-3 overflow-x-auto rounded-xl border border-ria-border bg-ria-bg p-1">
+          <table className="w-full text-left border-collapse min-w-[320px]">
+            <thead>
+              <tr className="border-b border-ria-border bg-ria-card">
+                {headers.map((h, idx) => (
+                  <th key={idx} className="p-2 text-[11px] font-black uppercase text-ria-neon font-mono">
+                    {h.trim()}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-ria-border/50 text-xs">
+              {body.map((row, rIdx) => (
+                <tr key={rIdx} className="hover:bg-ria-card/40 transition-colors">
+                  {row.map((cell, cIdx) => (
+                    <td key={cIdx} className="p-2 text-gray-200 font-mono text-[11px]">
+                      {cell.trim()}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    return elements;
   };
 
   return (
     <div className="flex flex-col h-screen bg-ria-bg text-gray-100 font-sans antialiased selection:bg-ria-neon selection:text-ria-darkText">
       
-      {/* HEADER RIA */}
+      {/* HEADER */}
       <header className="flex items-center justify-between px-5 py-4 bg-ria-card/90 backdrop-blur-md border-b border-ria-border sticky top-0 z-10">
         <div className="flex items-center space-x-3">
           <div className="w-3 h-3 rounded-full bg-ria-neon animate-pulse" />
@@ -165,7 +220,7 @@ export default function Home() {
         </button>
       </header>
 
-      {/* CHAT AREA */}
+      {/* ZONE DE CHAT */}
       <main className="flex-1 overflow-y-auto p-4 space-y-4 max-w-3xl mx-auto w-full">
         {messages.map((msg, idx) => (
           <div
@@ -195,14 +250,14 @@ export default function Home() {
               <span className="animate-bounce">●</span>
               <span className="animate-bounce [animation-delay:0.2s]">●</span>
               <span className="animate-bounce [animation-delay:0.4s]">●</span>
-              <span className="ml-2 text-gray-400">Analyse et structuration du tableau...</span>
+              <span className="ml-2 text-gray-400">Construction du tableau...</span>
             </div>
           </div>
         )}
         <div ref={chatEndRef} />
       </main>
 
-      {/* SAISIE */}
+      {/* BARRE DE SAISIE */}
       <footer className="p-4 bg-ria-card/90 border-t border-ria-border max-w-3xl mx-auto w-full">
         <form
           onSubmit={(e) => {
@@ -215,7 +270,7 @@ export default function Home() {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ex: Donne-moi une séance PMA vélo de 1h"
+            placeholder="Ex: Séance PMA vélo de 1h"
             className="flex-1 bg-ria-bg border border-ria-border focus:border-ria-neon rounded-xl px-4 py-3 text-sm text-white focus:outline-none placeholder-gray-500 transition-all"
           />
           <button
@@ -228,7 +283,7 @@ export default function Home() {
         </form>
       </footer>
 
-      {/* MODALE REGLAGES */}
+      {/* MODALE RÉGLAGES PROFIL */}
       {showProfileModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-ria-card border border-ria-border w-full max-w-md rounded-2xl p-6 space-y-5">
