@@ -27,22 +27,14 @@ Message athlète : ${message}
 `;
 
     const cleanKey = apiKey.trim();
-    const isBearer = cleanKey.startsWith('AQ.');
-    
-    // Utilisation du nom de modèle officiel : gemini-1.5-flash-latest
-    const modelName = 'gemini-1.5-flash-latest';
-    const url = isBearer
-      ? `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`
-      : `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${cleanKey}`;
-
-    const headers = { 'Content-Type': 'application/json' };
-    if (isBearer) {
-      headers['Authorization'] = `Bearer ${cleanKey}`;
-    }
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
     const response = await fetch(url, {
       method: 'POST',
-      headers,
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-goog-api-key': cleanKey
+      },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }]
       })
