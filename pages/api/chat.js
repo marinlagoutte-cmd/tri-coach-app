@@ -8,7 +8,7 @@ export default async function handler(req, res) {
 
   if (!rawKey) {
     return res.status(200).json({ 
-      reply: "⚠️ Clé API manquante. Ajoute GEMINI_API_KEY dans Vercel (Settings > Environment Variables) puis fais un Redeploy." 
+      reply: "⚠️ Clé API manquante dans Vercel (Settings > Environment Variables)." 
     });
   }
 
@@ -29,7 +29,6 @@ Règles strictes :
 Message athlète : ${message}
 `;
 
-  // Liste des modèles à tester dans l'ordre de priorité
   const modelsToTry = [
     'gemini-1.5-flash',
     'gemini-1.5-pro',
@@ -62,11 +61,9 @@ Message athlète : ${message}
 
       if (data.error) {
         lastError = data.error.message;
-        // Si le modèle n'est pas trouvé, la boucle essaye le modèle suivant
         if (data.error.message.includes('not found')) {
           continue;
         } else {
-          // Si c'est une autre erreur (ex: clé invalide), on arrête la boucle
           return res.status(200).json({ reply: `❌ Erreur Google Gemini : ${data.error.message}` });
         }
       }
@@ -76,29 +73,6 @@ Message athlète : ${message}
   }
 
   return res.status(200).json({ 
-    reply: `❌ Impossible de joindre l'API Gemini. Dernier message d'erreur : ${lastError}` 
+    reply: `❌ Impossible de joindre l'API Gemini. Dernier message : ${lastError}` 
   });
-}      },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
-      })
-    });
-
-    const data = await response.json();
-
-    if (data.error) {
-      return res.status(200).json({ reply: `❌ Erreur Google Gemini : ${data.error.message}` });
-    }
-
-    const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!replyText) {
-      return res.status(200).json({ reply: "❌ Réponse vide reçue de l'IA." });
-    }
-
-    return res.status(200).json({ reply: replyText });
-
-  } catch (err) {
-    return res.status(200).json({ reply: `❌ Erreur serveur : ${err.message}` });
-  }
 }
