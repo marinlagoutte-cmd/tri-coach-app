@@ -7,9 +7,7 @@ export default async function handler(req, res) {
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
-    return res.status(200).json({ 
-      reply: "⚠️ Clé API manquante dans Vercel (GEMINI_API_KEY)." 
-    });
+    return res.status(200).json({ reply: "⚠️ Clé API manquante dans Vercel (GEMINI_API_KEY)." });
   }
 
   const prompt = `
@@ -27,35 +25,53 @@ Règles strictes :
 Message athlète : ${message}
 `;
 
-  try {
-    // Emploi de l'alias dynamique "gemini-flash-latest" pour éviter la péremption d'un numéro de version
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey.trim()}`;
+  const modelsToTry = ['gemini-flash-latest', 'gemini-pro-latest', 'gemini-flash-lite-latest'];
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
-      })
-    });
+  let lastError = null;
 
-    const data = await response.json();
+  for (const model of modelsToTry) {
+    // Jusqu'à 3 tentatives par modèle, avec backoff exponentiel (500ms, 1s, 2s)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000); // 15s max par appel
 
-    if (data.error) {
-      return res.status(200).json({ reply: `❌ Erreur API (${data.error.code}) : ${data.error.message}` });
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+          signal: controller.signal
+        });
+        clearTimeout(timeout);
+
+        const data = await response.json();
+
+        // Succès
+        if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+          return res.status(200).json({ reply: data.candidates[0].content.parts[0].text });
+        }
+
+        if (data.error) {
+          lastError = `[${model}] ${data.error.code} — ${data.error.message}`;
+
+          // 503 (surcharge) ou 429 (quota) : ça vaut le coup de réessayer ce même modèle
+          if (data.error.code === 503 || data.error.code === 429) {
+            await sleep(500 * Math.pow(2, attempt)); // 500ms → 1s → 2s
+            continue;
+          }
+          // 404 (modèle introuvable) ou autre erreur définitive : inutile de réessayer, passe à l'alias suivant
+          break;
+        }
+      } catch (err) {
+        lastError = `[${model}] ${err.name === 'AbortError' ? 'Timeout (15s)' : err.message}`;
+        await sleep(500 * Math.pow(2, attempt));
+      }
     }
-
-    const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!replyText) {
-      return res.status(200).json({ reply: "❌ Réponse vide reçue de l'IA." });
-    }
-
-    return res.status(200).json({ reply: replyText });
-
-  } catch (err) {
-    return res.status(200).json({ reply: `❌ Erreur serveur : ${err.message}` });
   }
+
+  return res.status(200).json({
+    reply: `❌ Le coach est temporairement indisponible (surcharge Google). Réessaie dans une minute. Détail technique : ${lastError}`
+  });
 }
