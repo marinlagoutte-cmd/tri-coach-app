@@ -113,10 +113,13 @@ export default function Home() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: textToSend, profile })
+        body: JSON.stringify({ message: textToSend, profile, workouts })
       });
       const data = await res.json();
       setMessages([...newMessages, { sender: 'coach', text: data.reply }]);
+      if (data.updatedWorkouts) {
+        setWorkouts(data.updatedWorkouts);
+      }
     } catch (err) {
       setMessages([...newMessages, { sender: 'coach', text: "❌ Erreur de connexion avec le coach." }]);
     } finally {
@@ -374,7 +377,7 @@ export default function Home() {
               </div>
 
               <div className="space-y-2">
-                {workouts[activeWeek].map((w) => (
+                {workouts[activeWeek]?.map((w) => (
                   <div
                     key={w.id}
                     className="bg-ria-bg border border-ria-border hover:border-ria-neon/40 rounded-xl p-3 flex flex-col md:flex-row md:items-center justify-between transition-all space-y-2 md:space-y-0"
