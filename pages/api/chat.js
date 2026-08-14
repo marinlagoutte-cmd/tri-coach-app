@@ -14,12 +14,25 @@ export default async function handler(req, res) {
     const updatedWorkouts = mergeWorkoutPatches(workouts, patches, profile);
     return res.status(200).json({ reply, updatedWorkouts });
   } catch (error) {
-    const isNoKey = /Clé API Gemini manquante/.test(error.message || '');
-    console.error('chat error:', error);
+    console.error('chat error:', error?.message || error);
+    // Detect model missing / 404 style messages
+    const msg = String(error?.message || '').toLowerCase();
+    if (msg.includes('aucun modèle disponible') || msg.includes('not found') || msg.includes('404')) {
+      return res.status(503).json({
+        reply: "⚠️ Le coach IA est temporairement indisponible (modèle introuvable). J'ai enregistré ta demande et tu peux réessayer plus tard.",
+        updatedWorkouts: workouts,
+      });
+    }
+
+    if (/clé api/i.test(String(error?.message || ''))) {
+      return res.status(200).json({
+        reply: "⚠️ Le coach IA n'est pas encore connecté : ajoute GOOGLE_GENERATIVE_AI_API_KEY dans ton fichier .env.local.",
+        updatedWorkouts: workouts,
+      });
+    }
+
     return res.status(200).json({
-      reply: isNoKey
-        ? "⚠️ Le coach IA n'est pas encore connecté : ajoute GOOGLE_GENERATIVE_AI_API_KEY dans ton fichier .env.local."
-        : "Je n'ai pas réussi à traiter ta demande, réessaie dans un instant.",
+      reply: "Je n'ai pas réussi à traiter ta demande pour le moment, réessaie dans un instant.",
       updatedWorkouts: workouts,
     });
   }
