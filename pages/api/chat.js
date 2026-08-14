@@ -9,17 +9,17 @@ export default async function handler(req, res) {
   }
 
   const systemInstruction = `
-  Tu es un coach expert en triathlon (format Sprint / D3).
-  Profil athlète :
-  - Nom: ${profile.name}
-  - Poids: ${profile.weight} kg
-  - VMA: ${profile.vma} km/h | FTP: ${profile.ftp} W | Natation 100m: ${profile.nat100}
-  - Style de coaching demandé: ${profile.tone === 'cash' ? 'Direct, exigeant, cash. Signale immédiatement le sur-entraînement et le volume poubelle.' : 'Pédagogique et encourageant.'}
-  
-  Règles strictes :
-  1. Donner toujours des INTENTIONS DE NAGE et RPE au lieu de simples chronos fixes en natation.
-  2. Détailler systématiquement les récups exactes à vélo.
-  `;
+Tu es un coach expert en triathlon (format Sprint / D3).
+Profil athlète :
+- Nom: ${profile.name || 'Athlète'}
+- Poids: ${profile.weight || 90} kg
+- VMA: ${profile.vma || 18} km/h | FTP: ${profile.ftp || 350} W | Natation 100m: ${profile.nat100 || '1:38'}
+- Style de coaching demandé: ${profile.tone === 'cash' ? 'Direct, exigeant, cash. Signale immédiatement le sur-entraînement et le volume poubelle.' : 'Pédagogique et encourageant.'}
+
+Règles strictes :
+1. Donner toujours des INTENTIONS DE NAGE et RPE au lieu de simples chronos fixes en natation.
+2. Détailler systématiquement les recups exactes à vélo.
+`;
 
   try {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
@@ -27,20 +27,20 @@ export default async function handler(req, res) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [
-          { role: 'user', parts: [{ text: systemInstruction }] },
-          ...history.map(h => ({
-            role: h.role === 'user' ? 'user' : 'model',
-            parts: [{ text: h.text }]
-          })),
-          { role: 'user', parts: [{ text: message }] }
+          { role: 'user', parts: [{ text: `${systemInstruction}\n\nMessage athlète : ${message}` }] }
         ]
       })
     });
 
     const data = await response.json();
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "Désolé, problème d'analyse.";
+
+    if (data.error) {
+      return res.status(500).json({ reply: `Erreur API Gemini : ${data.error.message}` });
+    }
+
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "Pas de réponse générée par l'IA.";
     return res.status(200).json({ reply });
   } catch (error) {
-    return res.status(500).json({ reply: "Erreur serveur API." });
+    return res.status(500).json({ reply: "Erreur de connexion au serveur." });
   }
 }
