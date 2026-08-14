@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import CalendarView from '../components/CalendarView';
 
 export default function Home() {
   const [profile, setProfile] = useState({
