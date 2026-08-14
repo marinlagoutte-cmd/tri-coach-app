@@ -17,6 +17,14 @@ const AVG_TIME_TABLE = {
   },
 };
 
+const TRIATHLON_FORMAT_DISTANCES = {
+  XS: { swim: 0.4, bike: 10, run: 2.5 },
+  S: { swim: 0.75, bike: 20, run: 5 },
+  M: { swim: 1.5, bike: 40, run: 10 },
+  L: { swim: 1.9, bike: 90, run: 21.1 },
+  XL: { swim: 3.8, bike: 180, run: 42.2 },
+};
+
 export default function WizardModal({ isOpen, onClose, onComplete, submitting = false, submitError = null }) {
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
@@ -139,8 +147,16 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
     setFormData({ ...formData, runningPace: Number(pace), targetTime: minutesToHHMM(valMinutes) });
   };
 
+  const selectTriathlonFormat = (fmt) => {
+    setFormData({
+      ...formData,
+      triathlonFormat: fmt,
+      customDistances: TRIATHLON_FORMAT_DISTANCES[fmt] || formData.customDistances,
+    });
+  };
+
   const stepIsValid = () => {
-    if (step === 1) return Boolean(formData.weight);
+    if (step === 1) return Boolean(formData.weight) && Number(formData.weight) > 0;
     if (step === 4) return Boolean(formData.targetDate) && Number(formData.hoursPerWeek) > 0 && Number(formData.maxSessionsPerWeek) > 0;
     return true;
   };
@@ -158,25 +174,250 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-6 text-slate-100 max-h-[90vh] overflow-y-auto">
 
-        <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-          <div>
-            <span className="text-[10px] font-mono text-orange-400 uppercase tracking-widest block">Assistant de création</span>
-            <h2 className="text-lg font-bold font-display">Configuration de ton plan d'entraînement</h2>
-          </div>
-          <span className="text-xs font-mono text-slate-500 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">Étape {step} / 4</span>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-black uppercase tracking-wide text-white font-display">Nouveau plan</h2>
+          <span className="text-[10px] font-mono text-slate-500">Étape {step} / 4</span>
+        </div>
+
+        <div className="flex gap-1.5">
+          {[1, 2, 3, 4].map((s) => (
+            <div
+              key={s}
+              className={`h-1 flex-1 rounded-full ${s <= step ? 'bg-orange-500' : 'bg-slate-800'}`}
+            />
+          ))}
         </div>
 
         <div className="space-y-4">
 
-          {/* STEP 1 — À CONSERVER : colle ici ton vrai contenu de step 1 si tu en as un */}
+          {/* STEP 1 : Profil & discipline */}
           {step === 1 && (
             <div className="space-y-4">
               <h3 className="text-xs font-black uppercase tracking-wide text-orange-400">1. Profil & discipline</h3>
-              {/* ... same as before for basic fields ... */}
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Nom de l'objectif (optionnel)</label>
+                <input
+                  type="text"
+                  value={formData.eventName}
+                  onChange={(e) => setFormData({ ...formData, eventName: e.target.value })}
+                  placeholder="Ex: Triathlon de Deauville"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white placeholder-slate-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Genre</label>
+                  <div className="flex bg-slate-950 border border-slate-800 rounded-xl p-0.5">
+                    {['homme', 'femme'].map((g) => (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, gender: g })}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold capitalize transition-all ${
+                          formData.gender === g ? 'bg-orange-500 text-white' : 'text-slate-400'
+                        }`}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Poids (kg)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={formData.weight}
+                    onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
+                    placeholder="ex: 70"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white placeholder-slate-600"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">
+                  Niveau de forme actuel : <strong className="text-orange-400 font-mono">{formData.fitnessLevel} / 5</strong>
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="5"
+                  step="1"
+                  value={formData.fitnessLevel}
+                  onChange={(e) => setFormData({ ...formData, fitnessLevel: Number(e.target.value) })}
+                  className="w-full accent-orange-500 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Type de sport</label>
+                <div className="flex bg-slate-950 border border-slate-800 rounded-xl p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, sportType: 'running' })}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      formData.sportType === 'running' ? 'bg-orange-500 text-white' : 'text-slate-400'
+                    }`}
+                  >
+                    Course à pied
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, sportType: 'triathlon' })}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      formData.sportType === 'triathlon' ? 'bg-orange-500 text-white' : 'text-slate-400'
+                    }`}
+                  >
+                    Triathlon
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* STEP 2 — À CONSERVER : colle ici ton vrai contenu de step 2 si tu en as un */}
+          {/* STEP 2 : Format & distance */}
+          {step === 2 && (
+            <div className="space-y-4">
+              <h3 className="text-xs font-black uppercase tracking-wide text-orange-400">2. Format & distance</h3>
+
+              {formData.sportType === 'running' ? (
+                <>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Type de course</label>
+                    <div className="flex bg-slate-950 border border-slate-800 rounded-xl p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, runningSubtype: 'road' })}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          formData.runningSubtype === 'road' ? 'bg-orange-500 text-white' : 'text-slate-400'
+                        }`}
+                      >
+                        Route
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, runningSubtype: 'trail' })}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          formData.runningSubtype === 'trail' ? 'bg-orange-500 text-white' : 'text-slate-400'
+                        }`}
+                      >
+                        Trail
+                      </button>
+                    </div>
+                  </div>
+
+                  {formData.runningSubtype === 'road' ? (
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">Distance</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {Object.keys(AVG_TIME_TABLE.running).map((d) => (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() => setFormData({ ...formData, distance: d })}
+                            className={`py-2 rounded-xl border text-xs font-bold transition-all ${
+                              formData.distance === d
+                                ? 'border-orange-500 bg-orange-500/10 text-orange-400'
+                                : 'border-slate-800 bg-slate-950 text-slate-400'
+                            }`}
+                          >
+                            {d}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-slate-400 block mb-1">Distance (km)</label>
+                        <input
+                          type="number"
+                          step="0.5"
+                          value={formData.trailKm}
+                          onChange={(e) => setFormData({ ...formData, trailKm: e.target.value })}
+                          placeholder="ex: 42"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white placeholder-slate-600"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-400 block mb-1">D+ (m)</label>
+                        <input
+                          type="number"
+                          step="50"
+                          value={formData.trailElevation}
+                          onChange={(e) => setFormData({ ...formData, trailElevation: e.target.value })}
+                          placeholder="ex: 1800"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white placeholder-slate-600"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Format</label>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {Object.keys(AVG_TIME_TABLE.triathlon).map((fmt) => (
+                        <button
+                          key={fmt}
+                          type="button"
+                          onClick={() => selectTriathlonFormat(fmt)}
+                          className={`py-2 rounded-xl border text-xs font-bold transition-all ${
+                            formData.triathlonFormat === fmt
+                              ? 'border-orange-500 bg-orange-500/10 text-orange-400'
+                              : 'border-slate-800 bg-slate-950 text-slate-400'
+                          }`}
+                        >
+                          {fmt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Distances (km) — modifiables</label>
+                    <div className="grid grid-cols-3 gap-2 font-mono text-xs">
+                      <div>
+                        <span className="text-[9px] text-cyan-400 block mb-0.5">🏊 Nat</span>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={formData.customDistances.swim}
+                          onChange={(e) => setFormData({ ...formData, customDistances: { ...formData.customDistances, swim: Number(e.target.value) } })}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-amber-400 block mb-0.5">🚴 Vélo</span>
+                        <input
+                          type="number"
+                          step="1"
+                          value={formData.customDistances.bike}
+                          onChange={(e) => setFormData({ ...formData, customDistances: { ...formData.customDistances, bike: Number(e.target.value) } })}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-emerald-400 block mb-0.5">🏃 Course</span>
+                        <input
+                          type="number"
+                          step="0.5"
+                          value={formData.customDistances.run}
+                          onChange={(e) => setFormData({ ...formData, customDistances: { ...formData.customDistances, run: Number(e.target.value) } })}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           {/* STEP 3 : Objectif & prédiction */}
           {step === 3 && (
