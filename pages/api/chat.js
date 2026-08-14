@@ -1,17 +1,20 @@
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ reply: 'Méthode non autorisée' });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ reply: 'Méthode non autorisée' });
+  }
 
   const { message, profile } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY;
+  const rawKey = process.env.GEMINI_API_KEY;
 
-  if (!apiKey) {
+  if (!rawKey) {
     return res.status(200).json({ 
-      reply: "⚠️ Clé API manquante dans Vercel." 
+      reply: "⚠️ Clé API manquante. Ajoute GEMINI_API_KEY dans Vercel (Settings > Environment Variables) puis fais un Redeploy." 
     });
   }
 
-  try {
-    const prompt = `
+  const apiKey = rawKey.trim();
+
+  const prompt = `
 Tu es un coach expert en triathlon (format Sprint / D3).
 Profil athlète :
 - Nom: ${profile?.name || 'Athlète'}
@@ -26,15 +29,56 @@ Règles strictes :
 Message athlète : ${message}
 `;
 
-    const cleanKey = apiKey.trim();
-    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+  // Liste des modèles à tester dans l'ordre de priorité
+  const modelsToTry = [
+    'gemini-1.5-flash',
+    'gemini-1.5-pro',
+    'gemini-2.0-flash'
+  ];
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-goog-api-key': cleanKey
-      },
+  let lastError = null;
+
+  for (const model of modelsToTry) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        return res.status(200).json({ 
+          reply: data.candidates[0].content.parts[0].text 
+        });
+      }
+
+      if (data.error) {
+        lastError = data.error.message;
+        // Si le modèle n'est pas trouvé, la boucle essaye le modèle suivant
+        if (data.error.message.includes('not found')) {
+          continue;
+        } else {
+          // Si c'est une autre erreur (ex: clé invalide), on arrête la boucle
+          return res.status(200).json({ reply: `❌ Erreur Google Gemini : ${data.error.message}` });
+        }
+      }
+    } catch (err) {
+      lastError = err.message;
+    }
+  }
+
+  return res.status(200).json({ 
+    reply: `❌ Impossible de joindre l'API Gemini. Dernier message d'erreur : ${lastError}` 
+  });
+}      },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }]
       })
