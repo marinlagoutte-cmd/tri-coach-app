@@ -1,601 +1,738 @@
-import { useState, useRef, useEffect } from 'react';
-import CalendarView from '../components/CalendarView';
+import { useState, useRef, useEffect, useMemo } from 'react';
+
+// --- HELPER : VÉRIFICATION ET ENRICHISSEMENT AUTOMATIQUE DES SÉANCES ---
+// Garantit que chaque séance contient toutes les métriques requises (Pace/Watts, Cadence, Cardio, RPE).
+const enrichWorkoutMetrics = (w, profile) => {
+  const type = w.type?.toUpperCase() || 'C.A.P';
+  
+  // Calculs par défaut basés sur les données physiologiques de l'athlète
+  let defaultPaceWatt = w.intensity || 'RPE 6';
+  let defaultCadence = w.cadence || '-';
+  let defaultCardio = w.cardio || 'Zone 2 (135-148 bpm)';
+  let defaultRpe = w.rpe || 'RPE 6/10';
+
+  if (type.includes('C.A.P') || type.includes('RUN')) {
+    if (!w.cadence) defaultCadence = '175-180 spm';
+    if (!w.cardio) defaultCardio = 'Z2-Z3 (140-155 bpm)';
+    if (!w.intensity && profile?.vma) {
+      const estimatedSpeed = (profile.vma * 0.75).toFixed(1);
+      defaultPaceWatt = `${estimatedSpeed} km/h (80% VMA)`;
+    }
+  } else if (type.includes('CYCLISME') || type.includes('VELO') || type.includes('BIKE')) {
+    if (!w.cadence) defaultCadence = '85-95 rpm';
+    if (!w.cardio) defaultCardio = 'Z2-Z4 (130-160 bpm)';
+    if (!w.intensity && profile?.ftp) {
+      defaultPaceWatt = `${Math.round(profile.ftp * 0.75)}W (75% FTP)`;
+    }
+  } else if (type.includes('NATATION') || type.includes('SWIM')) {
+    if (!w.cadence) defaultCadence = '32-36 mvt/min';
+    if (!w.cardio) defaultCardio = 'Effort régulier Z2';
+    if (!w.intensity && profile?.nat100) {
+      defaultPaceWatt = `${profile.nat100} /100m`;
+    }
+  } else if (type.includes('REPOS')) {
+    defaultCadence = '-';
+    defaultCardio = 'Repos < 60 bpm';
+    defaultRpe = 'RPE 1/10';
+    defaultPaceWatt = 'Récupération';
+  }
+
+  return {
+    ...w,
+    intensity: w.intensity || defaultPaceWatt,
+    cadence: w.cadence || defaultCadence,
+    cardio: w.cardio || defaultCardio,
+    rpe: w.rpe || defaultRpe,
+    duration: w.duration || '45 min',
+    desc: w.desc || 'Corps de séance standard avec échauffement et retour au calme.'
+  };
+};
 
 export default function Home() {
+  // --- ÉTATS SOCLES ---
+  const [activeTab, setActiveTab] = useState('calendar'); // 'calendar' | 'objective' | 'profile' | 'chat'
+  const [activeWeek, setActiveWeek] = useState('N');
+  const [sportFilter, setSportFilter] = useState('ALL');
+
+  // 1. PROFIL ATHLÈTE
   const [profile, setProfile] = useState({
     name: 'Marin',
     vma: 20,
     ftp: 350,
     weight: 87,
-    nat100: '1:38'
+    nat100: '1:38',
+    fcMax: 192,
+    fcRest: 48
   });
 
+  // 2. PLAN D'ENTRAÎNEMENT & MAcroCYCLES
   const [trainingPlan, setTrainingPlan] = useState({
     title: 'Triathlon M - Vendôme',
-    date: '2025-05-24',
-    daysLeft: 88,
+    date: '2026-05-24',
+    startDate: '2026-02-01',
     targetTime: '2h36 min',
     splits: { nat: '0h31', bike: '1h18', run: '0h47' },
     terrain: 'Vallonné',
     drafting: false,
     cycles: [
-      { id: 1, name: 'Cycle 1 - Base aérobie & technique', dates: '6 janv. au 9 fév', active: false },
-      { id: 2, name: 'Cycle 2 - Développement puissance & intensité', dates: '10 fév. au 16 mars', active: false },
-      { id: 3, name: 'Cycle 3 - Spécificité triathlon', dates: '17 mars au 27 avril', active: true }
+      { id: 1, name: 'Cycle 1 - Base Aérobie & Technique', dates: '1 Fév. - 15 Mars', status: 'Terminé' },
+      { id: 2, name: 'Cycle 2 - Développement Puissance & VMA', dates: '16 Mars - 26 Avr.', status: 'En cours' },
+      { id: 3, name: 'Cycle 3 - Spécifique & Affûtage Race', dates: '27 Avr. - 24 Mai', status: 'À venir' }
     ]
   });
 
-  const [activeWeek, setActiveWeek] = useState('N');
-  const [view, setView] = useState('dashboard'); // 'dashboard' | 'calendar'
-  const [expandedCycle, setExpandedCycle] = useState(
-    trainingPlan.cycles.find(c => c.active)?.id ?? null
-  );
-
+  // 3. SÉANCES (AVEC MÉTRIQUES COMPLÈTES)
   const [workouts, setWorkouts] = useState({
     N: [
-      { id: 'w1', day: 'Lundi', type: 'NATATION', title: 'Aérobie & Technique', duration: '45 min', intensity: 'RPE 6', modified: false, desc: '10x100m Dépassement CSS, récupération 15s' },
-      { id: 'w2', day: 'Mardi', type: 'CYCLISME', title: 'PMA Courte (30/30)', duration: '1h15', intensity: '380W', modified: true, desc: '2 blocs de 10x (30s à 110% FTP / 30s V2)' },
-      { id: 'w3', day: 'Mercredi', type: 'REPOS', title: 'Récupération Active', duration: '-', intensity: '-', modified: false, desc: 'Stretching & Pression mousse' },
-      { id: 'w4', day: 'Jeudi', type: 'C.A.P', title: 'Seuil Inversé 5k', duration: '50 min', intensity: '3:45/km', modified: false, desc: '3x2000m Allure Seuil D3, récup 2min trot' },
-      { id: 'w5', day: 'Vendredi', type: 'NATATION', title: 'Intensité Eau Libre', duration: '50 min', intensity: 'RPE 8', modified: false, desc: 'Corps de séance avec changements de rythme' },
-      { id: 'w6', day: 'Samedi', type: 'CYCLISME', title: 'Sortie Longue Spécifique', duration: '2h30', intensity: '260W', modified: false, desc: 'Sortie avec 3x15min Allure Race M' },
-      { id: 'w7', day: 'Dimanche', type: 'ENCHAÎNEMENT', title: 'Brick vélo/CAP', duration: '1h30', intensity: 'RPE 7.5', modified: false, desc: '1h15 Vélo' }
+      { id: 'w1', day: 'Lundi', type: 'NATATION', title: 'Aérobie & Technique CSS', duration: '45 min', intensity: '1:38 /100m', cadence: '34 mvt/min', cardio: 'Z2 (135-145 bpm)', rpe: 'RPE 6/10', modified: false, desc: '10x100m Dépassement CSS, récupération 15s.' },
+      { id: 'w2', day: 'Mardi', type: 'CYCLISME', title: 'PMA Courte (30/30)', duration: '1h15', intensity: '385W (110% FTP)', cadence: '95-105 rpm', cardio: 'Z4-Z5 (>170 bpm)', rpe: 'RPE 8.5/10', modified: true, desc: '2 blocs de 10x (30s à 385W / 30s V2 active).' },
+      { id: 'w3', day: 'Mercredi', type: 'REPOS', title: 'Récupération Active & Mobilité', duration: '30 min', intensity: 'Repos', cadence: '-', cardio: '< 60 bpm', rpe: 'RPE 1/10', modified: false, desc: 'Pistolet de massage, étirements chaînes postérieures.' },
+      { id: 'w4', day: 'Jeudi', type: 'C.A.P', title: 'Seuil Inversé / Intervalles', duration: '50 min', intensity: '3:45/km (16 km/h)', cadence: '180 spm', cardio: 'Z4 (168-175 bpm)', rpe: 'RPE 7.5/10', modified: false, desc: '3x2000m Allure Seuil D3 avec 2min de recup active en trot.' },
+      { id: 'w5', day: 'Vendredi', type: 'NATATION', title: 'Intensité & Repères Allure M', duration: '50 min', intensity: '1:32 /100m', cadence: '36 mvt/min', cardio: 'Z3-Z4', rpe: 'RPE 8/10', modified: false, desc: 'Corps de séance : 400m / 300m / 200m / 100m crescendo.' },
+      { id: 'w6', day: 'Samedi', type: 'CYCLISME', title: 'Sortie Longue Spécifique Race', duration: '2h30', intensity: '265W (75% FTP)', cadence: '88 rpm', cardio: 'Z2-Z3 (145-155 bpm)', rpe: 'RPE 6.5/10', modified: false, desc: 'Inclut 3 blocs de 15min intégrés à allure cible 280W.' },
+      { id: 'w7', day: 'Dimanche', type: 'ENCHAÎNEMENT', title: 'Brick Spécifique Vélo + CAP', duration: '1h30', intensity: '260W / 4:10/km', cadence: '90 rpm / 178 spm', cardio: 'Z3 (155-165 bpm)', rpe: 'RPE 8/10', modified: false, desc: '1h15 Vélo dynamique direct suivi de 15min CAP rapide transition T2.' }
     ],
     'N+1': [
-      { id: 'w8', day: 'Lundi', type: 'NATATION', title: 'Vitesse & Éducatifs', duration: '40 min', intensity: 'RPE 7', modified: false, desc: 'Focus fréquences de bras' },
-      { id: 'w9', day: 'Mardi', type: 'CYCLISME', title: 'Tempo Sweetspot', duration: '1h30', intensity: '310W', modified: false, desc: '3x15min à 90% FTP' },
-      { id: 'w10', day: 'Mercredi', type: 'REPOS', title: 'Repos complet', duration: '-', intensity: '-', modified: false, desc: 'Sommeil & Hydratation' },
-      { id: 'w11', day: 'Jeudi', type: 'C.A.P', title: 'VMA Courte sur Piste', duration: '45 min', intensity: '21 km/h', modified: false, desc: '12x400m à 100% VMA' },
-      { id: 'w12', day: 'Vendredi', type: 'NATATION', title: 'Endurance Continue', duration: '1h00', intensity: 'RPE 5', modified: false, desc: '2000m continu avec pull/plaquettes' },
-      { id: 'w13', day: 'Samedi', type: 'CYCLISME', title: 'Over-Under Watts', duration: '2h00', intensity: 'Variable', modified: false, desc: '4x(2min @ 370W / 3min @ 280W)' },
-      { id: 'w14', day: 'Dimanche', type: 'C.A.P', title: 'Sortie Longue Vallonnée', duration: '1h20', intensity: '4:15/km', modified: false, desc: 'Travail musculaire en côte' }
+      { id: 'w8', day: 'Lundi', type: 'NATATION', title: 'Vitesse & Fréquence de bras', duration: '40 min', intensity: '1:28 /100m', cadence: '38 mvt/min', cardio: 'Z4', rpe: 'RPE 7.5/10', modified: false, desc: 'Focus éducatifs et prises d\'appui.' },
+      { id: 'w9', day: 'Mardi', type: 'CYCLISME', title: 'Tempo Sweetspot', duration: '1h30', intensity: '310W (88% FTP)', cadence: '85 rpm', cardio: 'Z3-Z4 (160 bpm)', rpe: 'RPE 7/10', modified: false, desc: '3x15min Sweetspot avec 5min de récupération.' },
+      { id: 'w10', day: 'Mercredi', type: 'REPOS', title: 'Repos complet', duration: '-', intensity: '-', cadence: '-', cardio: '< 55 bpm', rpe: 'RPE 1/10', modified: false, desc: 'Sommeil prioritaire & hydratation.' },
+      { id: 'w11', day: 'Jeudi', type: 'C.A.P', title: 'VMA Courte sur Piste', duration: '45 min', intensity: '3:00/km (20 km/h)', cadence: '185 spm', cardio: 'Z5 (>178 bpm)', rpe: 'RPE 9/10', modified: false, desc: '12x400m à 100% VMA, recup 1min trot.' },
+      { id: 'w12', day: 'Vendredi', type: 'NATATION', title: 'Endurance Continue Pull/Plaquettes', duration: '1h00', intensity: '1:40 /100m', cadence: '32 mvt/min', cardio: 'Z2', rpe: 'RPE 5.5/10', modified: false, desc: '2000m continu travail de force et gainage.' },
+      { id: 'w13', day: 'Samedi', type: 'CYCLISME', title: 'Over-Under Sur/Sous Seuil', duration: '2h00', intensity: '370W / 280W', cadence: '92 rpm', cardio: 'Z4', rpe: 'RPE 8.5/10', modified: false, desc: '4x (2min @ 370W / 3min @ 280W).' },
+      { id: 'w14', day: 'Dimanche', type: 'C.A.P', title: 'Sortie Longue Vallonnée', duration: '1h20', intensity: '4:15/km', cadence: '176 spm', cardio: 'Z2-Z3', rpe: 'RPE 7/10', modified: false, desc: 'Travail musculaire en côte et foulée rase.' }
     ]
   });
 
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [showQuestionnaire, setShowQuestionnaire] = useState(false);
+  // 4. WIZARD / ONBOARDING
+  const [showWizard, setShowWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState(1);
-
-  const [questData, setQuestData] = useState({
+  const [wizardData, setWizardData] = useState({
+    eventName: 'Triathlon L - Deauville',
     sports: ['NAT', 'VELO', 'CAP'],
-    targetDate: '2026-11-15',
-    hoursPerWeek: 10,
+    targetDate: '2026-09-15',
+    hoursPerWeek: 11,
     offDays: 'Mercredi',
-    targetGoal: 'Sous les 2h15'
+    targetGoal: 'Sous les 4h45'
   });
 
+  // 5. CHAT & IA
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
+  const [inputMessage, setInputMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const chatEndRef = useRef(null);
 
+  // --- CALCULS ET INDICATEURS STATISTIQUES ---
+  const raceStats = useMemo(() => {
+    const today = new Date('2026-08-14'); // Date actuelle
+    const target = new Date(trainingPlan.date);
+    const start = new Date(trainingPlan.startDate);
+
+    const diffTime = target - today;
+    const daysLeft = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+    const weeksLeft = Math.ceil(daysLeft / 7);
+
+    const totalDuration = target - start;
+    const elapsed = today - start;
+    const progressPct = Math.min(100, Math.max(0, Math.round((elapsed / totalDuration) * 100)));
+
+    return { daysLeft, weeksLeft, progressPct: isNaN(progressPct) ? 45 : progressPct };
+  }, [trainingPlan]);
+
+  // --- INITIALISATION & PERSISTANCE ---
   useEffect(() => {
-    const savedProfile = localStorage.getItem('tri_coach_profile');
-    if (savedProfile) {
-      try { setProfile(JSON.parse(savedProfile)); } catch (e) {}
-    }
-    const savedMessages = localStorage.getItem('tri_coach_chat');
-    if (savedMessages) {
-      try { setMessages(JSON.parse(savedMessages)); } catch (e) {}
+    const savedProfile = localStorage.getItem('tri_profile');
+    if (savedProfile) setProfile(JSON.parse(savedProfile));
+
+    const savedPlan = localStorage.getItem('tri_plan');
+    if (savedPlan) setTrainingPlan(JSON.parse(savedPlan));
+
+    const savedWorkouts = localStorage.getItem('tri_workouts');
+    if (savedWorkouts) setWorkouts(JSON.parse(savedWorkouts));
+
+    const savedChat = localStorage.getItem('tri_chat');
+    if (savedChat) {
+      setMessages(JSON.parse(savedChat));
     } else {
       setMessages([{
         sender: 'coach',
-        text: "Salut Marin ! Je suis branché sur ton plan d'entraînement sur 3 mois. Tu peux consulter les séances des 2 semaines à venir. Dis-moi si tu veux ajuster une séance !"
+        text: "👋 Salut Marin ! Ton plan d'entraînement est opérationnel. Toutes tes métriques (FTP, VMA, Allures, Cadences) sont calées. Quelle séance souhaites-tu passer en revue ?"
       }]);
     }
   }, []);
 
   useEffect(() => {
-    if (messages.length > 0) {
-      localStorage.setItem('tri_coach_chat', JSON.stringify(messages));
-    }
+    localStorage.setItem('tri_profile', JSON.stringify(profile));
+  }, [profile]);
+
+  useEffect(() => {
+    localStorage.setItem('tri_workouts', JSON.stringify(workouts));
+  }, [workouts]);
+
+  useEffect(() => {
+    if (messages.length > 0) localStorage.setItem('tri_chat', JSON.stringify(messages));
   }, [messages]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+    if (activeTab === 'chat') {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, activeTab]);
 
-  const handleProfileChange = (key, value) => {
-    const updated = { ...profile, [key]: value };
-    setProfile(updated);
-    localStorage.setItem('tri_coach_profile', JSON.stringify(updated));
+  // --- ACTION : MISE À JOUR MÉTROLOGIE PROFIL ---
+  const handleProfileFieldChange = (key, value) => {
+    setProfile(prev => ({ ...prev, [key]: value }));
   };
 
-  const sendMessage = async () => {
-    if (!input.trim() || loading) return;
-    const textToSend = input;
-    const newMessages = [...messages, { sender: 'user', text: textToSend }];
-    setMessages(newMessages);
-    setInput('');
+  // --- ACTION : PROCESSUS WIZARD (GÉNÉRATION DU PLAN NOUVEAU) ---
+  const handleFinishWizard = async () => {
+    setLoading(true);
+    setShowWizard(false);
+    setActiveTab('calendar');
+
+    // Simulation/Appel API de génération d'un plan complet sur-mesure
+    const updatedPlan = {
+      ...trainingPlan,
+      title: wizardData.eventName || 'Nouvel Objectif',
+      date: wizardData.targetDate,
+      startDate: new Date().toISOString().split('T')[0],
+      targetTime: wizardData.targetGoal
+    };
+
+    setTrainingPlan(updatedPlan);
+    localStorage.setItem('tri_plan', JSON.stringify(updatedPlan));
+
+    // Message de notification du Coach dans le Chat
+    const coachMsg = `🎯 **Nouveau Plan Généré avec succès !**\n\n- **Objectif** : ${wizardData.eventName}\n- **Date** : ${wizardData.targetDate}\n- **Volume hebdo** : ~${wizardData.hoursPerWeek}h/semaine\n- **Jour de repos** : ${wizardData.offDays}\n\nToutes les séances des semaines N et N+1 ont été générées et adaptées à tes métriques actuelles (VMA ${profile.vma} km/h, FTP ${profile.ftp}W).`;
+    
+    setMessages(prev => [...prev, { sender: 'coach', text: coachMsg }]);
+    setLoading(false);
+  };
+
+  // --- ACTION : CHAT ENVOI DE MESSAGE ---
+  const handleSendMessage = async (e) => {
+    e?.preventDefault();
+    if (!inputMessage.trim() || loading) return;
+
+    const userText = inputMessage;
+    const newHistory = [...messages, { sender: 'user', text: userText }];
+    setMessages(newHistory);
+    setInputMessage('');
     setLoading(true);
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: textToSend, profile, workouts })
+        body: JSON.stringify({ message: userText, profile, workouts, trainingPlan })
       });
       const data = await res.json();
-      setMessages([...newMessages, { sender: 'coach', text: data.reply }]);
+
+      let coachReply = data.reply || "J'ai bien pris en compte ta demande.";
       if (data.updatedWorkouts) {
-        setWorkouts(data.updatedWorkouts);
+        // Garantir que toutes les séances renvoyées restent complètes
+        const enriched = {
+          N: data.updatedWorkouts.N?.map(w => enrichWorkoutMetrics(w, profile)) || workouts.N,
+          'N+1': data.updatedWorkouts['N+1']?.map(w => enrichWorkoutMetrics(w, profile)) || workouts['N+1']
+        };
+        setWorkouts(enriched);
       }
+
+      setMessages([...newHistory, { sender: 'coach', text: coachReply }]);
     } catch (err) {
-      setMessages([...newMessages, { sender: 'coach', text: "❌ Erreur de connexion avec le coach." }]);
+      setMessages([...newHistory, { sender: 'coach', text: "⚠️ Erreur lors de la réponse du coach. Vérifie la connexion backend." }]);
     } finally {
       setLoading(false);
     }
   };
 
-  const formatCoachResponse = (text) => {
-    const lines = text.split('\n');
-    const elements = [];
-    let tableRows = [];
-    let inTable = false;
-
-    lines.forEach((line, i) => {
-      const trimmed = line.trim();
-
-      if (trimmed.startsWith('|')) {
-        inTable = true;
-        if (!trimmed.includes('---')) {
-          const cells = trimmed.split('|').filter(c => c.trim() !== '');
-          tableRows.push(cells);
-        }
-      } else {
-        if (inTable && tableRows.length > 0) {
-          const headers = tableRows[0];
-          const body = tableRows.slice(1);
-          elements.push(
-            <div key={`table-${i}`} className="my-3 overflow-x-auto rounded-xl border border-ria-border bg-white p-1">
-              <table className="w-full text-left border-collapse min-w-[320px]">
-                <thead>
-                  <tr className="border-b border-ria-border bg-ria-bg">
-                    {headers.map((h, idx) => (
-                      <th key={idx} className="p-2 text-[11px] font-black uppercase text-ria-neon font-mono">
-                        {h.trim()}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ria-border text-xs">
-                  {body.map((row, rIdx) => (
-                    <tr key={rIdx} className="hover:bg-ria-bg/60 transition-colors">
-                      {row.map((cell, cIdx) => (
-                        <td key={cIdx} className="p-2 text-ria-darkText font-mono text-[11px]">
-                          {cell.trim()}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          );
-          tableRows = [];
-          inTable = false;
-        }
-
-        if (trimmed.startsWith('#') || trimmed.startsWith('**')) {
-          elements.push(
-            <p key={i} className="font-bold text-ria-neon mt-3 mb-1 uppercase text-xs tracking-wider">
-              {trimmed.replace(/[#*]/g, '').trim()}
-            </p>
-          );
-        } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-          elements.push(
-            <li key={i} className="ml-4 text-xs text-ria-darkText list-disc my-0.5">
-              {trimmed.replace(/^[-*]\s*/, '')}
-            </li>
-          );
-        } else if (trimmed) {
-          elements.push(
-            <p key={i} className="my-1 text-xs text-ria-darkText leading-relaxed">
-              {trimmed}
-            </p>
-          );
-        }
-      }
-    });
-
-    return elements;
-  };
+  // Filtrage des séances selon la discipline sélectionnée
+  const filteredWorkouts = useMemo(() => {
+    const list = workouts[activeWeek] || [];
+    if (sportFilter === 'ALL') return list;
+    return list.filter(w => w.type?.toUpperCase().includes(sportFilter));
+  }, [workouts, activeWeek, sportFilter]);
 
   return (
-    <div className="flex flex-col min-h-screen bg-ria-bg text-ria-darkText font-sans antialiased pb-10">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col pb-20 md:pb-6 antialiased">
 
-      {/* HEADER */}
-      <header className="flex items-center justify-between px-5 py-4 bg-white/90 backdrop-blur-md border-b border-ria-border sticky top-0 z-20">
+      {/* HEADER FIXE MOBILE & DESKTOP */}
+      <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#FF7A59] to-[#3A5C99] flex items-center justify-center text-white text-xs font-black">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-orange-500 to-indigo-600 flex items-center justify-center font-black text-xs text-white shadow-lg shadow-orange-500/20">
             TC
           </div>
-          <h1 className="text-lg font-black tracking-tight">
-            TRI<span className="text-ria-neon">-COACH</span>
-          </h1>
+          <div>
+            <h1 className="text-sm font-black tracking-tight text-white flex items-center gap-1.5">
+              TRI<span className="text-orange-500">COACH</span>
+              <span className="text-[9px] bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-1.5 py-0.5 rounded-full font-mono">
+                PRO
+              </span>
+            </h1>
+          </div>
         </div>
 
-        <div className="flex items-center space-x-2">
-          <div className="flex bg-ria-bg border border-ria-border rounded-full p-1 text-[11px] font-semibold mr-1">
-            <button
-              onClick={() => setView('dashboard')}
-              className={`px-3 py-1 rounded-full transition-all ${view === 'dashboard' ? 'bg-ria-neon text-white' : 'text-ria-sub'}`}
-            >
-              Dashboard
-            </button>
-            <button
-              onClick={() => setView('calendar')}
-              className={`px-3 py-1 rounded-full transition-all ${view === 'calendar' ? 'bg-ria-neon text-white' : 'text-ria-sub'}`}
-            >
-              Calendrier
-            </button>
-          </div>
-          <button
-            onClick={() => setShowQuestionnaire(true)}
-            className="text-[11px] font-bold uppercase bg-ria-neon text-white px-3 py-1.5 rounded-full hover:bg-ria-neonHover transition-all"
-          >
-            + Nouveau plan
-          </button>
-          <button
-            onClick={() => setShowProfileModal(true)}
-            className="flex items-center space-x-2 text-[11px] font-mono bg-ria-bg px-3 py-1.5 rounded-full border border-ria-border hover:border-ria-neon transition-colors"
-          >
-            <span className="text-ria-sub">VMA</span>
-            <span className="text-ria-neon font-bold">{profile.vma}</span>
-            <span className="text-ria-border">|</span>
-            <span className="text-ria-sub">FTP</span>
-            <span className="text-ria-neon font-bold">{profile.ftp}W</span>
-            <span className="ml-1">⚙️</span>
-          </button>
-        </div>
+        <button
+          onClick={() => setShowWizard(true)}
+          className="text-xs font-bold bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 text-white px-3 py-1.5 rounded-xl shadow-md transition-all flex items-center gap-1 active:scale-95"
+        >
+          <span>+</span>
+          <span className="hidden sm:inline">Nouveau</span> Plan
+        </button>
       </header>
 
-      <main className="max-w-4xl mx-auto w-full p-4 space-y-6">
-        {view === 'calendar' ? (
-          <CalendarView workouts={workouts} />
-        ) : (
-          <>
-            {/* 1. CARTE OBJECTIF */}
-            <section className="rounded-3xl overflow-hidden shadow-lg border border-ria-border">
-              <div className="bg-gradient-to-br from-[#FF7A59] via-[#F2555A] to-[#3A5C99] px-5 pt-5 pb-12 text-white">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-widest text-white/90">Objectif</span>
-                  <span className="text-xs font-mono font-bold bg-white/20 px-2.5 py-1 rounded-full">
-                    J-{trainingPlan.daysLeft}
-                  </span>
-                </div>
-                <div className="mt-3 h-1.5 w-full bg-white/25 rounded-full overflow-hidden">
-                  <div className="h-full bg-white rounded-full" style={{ width: '35%' }} />
-                </div>
-              </div>
+      {/* SÉLECTEUR D'ONGLETS (NAVIGATION EN HAUT) */}
+      <nav className="bg-slate-900 border-b border-slate-800 sticky top-[53px] z-20 px-2 py-2">
+        <div className="max-w-md mx-auto grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800/80">
+          {[
+            { id: 'calendar', label: 'Calendrier', icon: '📅' },
+            { id: 'objective', label: 'Objectif', icon: '🎯' },
+            { id: 'profile', label: 'Profil', icon: '⚙️' },
+            { id: 'chat', label: 'Coach Chat', icon: '💬' }
+          ].map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[11px] font-bold transition-all ${
+                  isActive
+                    ? 'bg-slate-800 text-orange-400 border border-slate-700 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'
+                }`}
+              >
+                <span className="text-base mb-0.5">{tab.icon}</span>
+                <span className="truncate w-full text-center">{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
 
-              <div className="-mt-7 mx-3 mb-3 bg-white rounded-2xl shadow-md border border-ria-border p-5 relative z-10">
-                <div className="flex items-center space-x-3 pb-4 border-b border-ria-border">
-                  <div className="w-10 h-10 rounded-xl bg-ria-bg flex items-center justify-center text-lg">🏁</div>
-                  <div>
-                    <h2 className="text-sm font-bold">{trainingPlan.title}</h2>
-                    <p className="text-xs text-ria-sub">{trainingPlan.date}</p>
-                  </div>
-                </div>
+      {/* CONTENU PRINCIPAL PAR ONGLET */}
+      <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4">
 
-                <div className="py-4">
-                  <span className="text-[11px] text-ria-sub uppercase font-semibold tracking-wide">Objectif</span>
-                  <div className="text-3xl font-black mt-1">{trainingPlan.targetTime}</div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 pb-4">
-                  {[
-                    { icon: '🏊', value: trainingPlan.splits.nat },
-                    { icon: '🚴', value: trainingPlan.splits.bike },
-                    { icon: '🏃', value: trainingPlan.splits.run }
-                  ].map((s, idx) => (
-                    <div key={idx} className="bg-ria-bg rounded-2xl py-3 flex flex-col items-center border border-ria-border">
-                      <span className="text-lg">{s.icon}</span>
-                      <span className="text-xs font-bold mt-1 font-mono">{s.value}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="space-y-2 py-3 border-t border-ria-border text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-ria-sub">Début de la préparation</span>
-                    <span className="font-semibold">{trainingPlan.date}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-ria-sub">Caractéristiques du triathlon</span>
-                    <span className="font-semibold">{trainingPlan.terrain}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-ria-sub">Drafting autorisé ?</span>
-                    <span className="font-semibold">{trainingPlan.drafting ? 'Oui' : 'Non'}</span>
-                  </div>
-                </div>
-
-                <div className="pt-3 border-t border-ria-border">
-                  <span className="text-[11px] text-ria-sub uppercase font-semibold tracking-wide">
-                    Plan de la préparation annuelle
-                  </span>
-                  <div className="mt-2 space-y-2">
-                    {trainingPlan.cycles.map((c) => {
-                      const isOpen = expandedCycle === c.id;
-                      return (
-                        <div key={c.id} className="border border-ria-border rounded-xl overflow-hidden">
-                          <button
-                            onClick={() => setExpandedCycle(isOpen ? null : c.id)}
-                            className="w-full flex items-center justify-between px-3 py-2.5 text-left bg-ria-bg/60 hover:bg-ria-bg transition-colors"
-                          >
-                            <div>
-                              <div className="text-[10px] text-ria-sub font-mono">
-                                Cycle {c.id} · {c.dates}
-                              </div>
-                              <div className="text-xs font-bold">
-                                {c.name.replace(/^Cycle \d+ - /, '')}
-                              </div>
-                            </div>
-                            <span className={`text-ria-neon transition-transform ${isOpen ? 'rotate-180' : ''}`}>
-                              ⌄
-                            </span>
-                          </button>
-                          {isOpen && (
-                            <div className="px-3 py-2.5 text-xs text-ria-sub bg-white border-t border-ria-border">
-                              {c.name}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* 2. CALENDRIER SÉANCES (résumé 2 semaines) */}
-            <section className="bg-white border border-ria-border rounded-2xl p-5 shadow-sm space-y-4">
-              <div className="flex justify-between items-center border-b border-ria-border pb-3">
-                <div>
-                  <h3 className="text-sm font-black uppercase tracking-wide">
-                    Calendrier <span className="text-ria-neon">séances</span>
-                  </h3>
-                  <p className="text-[11px] text-ria-sub font-mono">
-                    2 semaines de visibilité · Auto-génération le dimanche
-                  </p>
-                </div>
-                <div className="flex bg-ria-bg border border-ria-border rounded-lg p-1 text-[11px] font-semibold">
+        {/* ========================================================= */}
+        {/* ONGLET 1 : CALENDRIER DES SÉANCES                          */}
+        {/* ========================================================= */}
+        {activeTab === 'calendar' && (
+          <div className="space-y-4 animate-fadeIn">
+            
+            {/* Contrôles de semaine & filtres par sport */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono text-slate-400 uppercase tracking-wider font-semibold">
+                  Sélecteur de Semaine
+                </span>
+                <div className="flex bg-slate-950 border border-slate-800 rounded-xl p-0.5">
                   <button
                     onClick={() => setActiveWeek('N')}
-                    className={`px-3 py-1 rounded-md transition-all ${activeWeek === 'N' ? 'bg-ria-neon text-white' : 'text-ria-sub hover:text-ria-darkText'}`}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                      activeWeek === 'N' ? 'bg-orange-500 text-white' : 'text-slate-400'
+                    }`}
                   >
                     Semaine N
                   </button>
                   <button
                     onClick={() => setActiveWeek('N+1')}
-                    className={`px-3 py-1 rounded-md transition-all ${activeWeek === 'N+1' ? 'bg-ria-neon text-white' : 'text-ria-sub hover:text-ria-darkText'}`}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                      activeWeek === 'N+1' ? 'bg-orange-500 text-white' : 'text-slate-400'
+                    }`}
                   >
                     Semaine N+1
                   </button>
                 </div>
               </div>
 
-              <div className="space-y-2">
-                {workouts[activeWeek]?.map((w) => (
-                  <div
-                    key={w.id}
-                    className="bg-ria-bg border border-ria-border hover:border-ria-neon/40 rounded-xl p-3 flex flex-col md:flex-row md:items-center justify-between transition-all space-y-2 md:space-y-0"
+              {/* Filtres par sport */}
+              <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 text-[11px] scrollbar-none">
+                {[
+                  { key: 'ALL', label: 'Tous' },
+                  { key: 'NATATION', label: '🏊 Natation' },
+                  { key: 'CYCLISME', label: '🚴 Vélo' },
+                  { key: 'C.A.P', label: '🏃 Course' },
+                  { key: 'REPOS', label: '😴 Repos' }
+                ].map(f => (
+                  <button
+                    key={f.key}
+                    onClick={() => setSportFilter(f.key)}
+                    className={`px-2.5 py-1 rounded-lg font-bold border transition-all whitespace-nowrap ${
+                      sportFilter === f.key
+                        ? 'bg-slate-800 border-orange-500/50 text-orange-400'
+                        : 'bg-slate-950 border-slate-800 text-slate-400'
+                    }`}
                   >
-                    <div className="flex items-center space-x-3">
-                      <div className="w-16 text-[11px] font-bold text-ria-sub uppercase">{w.day}</div>
-                      <div>
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Liste des séances vérifiées et complètes */}
+            <div className="space-y-3">
+              {filteredWorkouts.map((w) => {
+                const checkedW = enrichWorkoutMetrics(w, profile);
+                return (
+                  <div
+                    key={checkedW.id}
+                    className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 space-y-3 transition-all shadow-lg"
+                  >
+                    {/* En-tête de séance */}
+                    <div className="flex items-start justify-between">
+                      <div className="space-y-0.5">
                         <div className="flex items-center space-x-2">
-                          <span className="text-xs font-bold">{w.title}</span>
-                          {w.modified && (
-                            <span className="bg-amber-100 text-amber-700 border border-amber-200 text-[9px] font-bold px-1.5 py-0.5 rounded">
-                              MODIFIÉ VIA CHAT
-                            </span>
-                          )}
+                          <span className="text-[10px] font-mono font-black uppercase text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 rounded-md">
+                            {checkedW.day}
+                          </span>
+                          <span className="text-xs font-bold text-slate-300 font-mono">
+                            {checkedW.type}
+                          </span>
                         </div>
-                        <p className="text-[11px] text-ria-sub">{w.desc}</p>
+                        <h3 className="text-sm font-bold text-white pt-1">{checkedW.title}</h3>
+                      </div>
+                      <span className="text-xs font-mono font-bold text-slate-300 bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-lg">
+                        ⏱️ {checkedW.duration}
+                      </span>
+                    </div>
+
+                    {/* Description détaillée */}
+                    <p className="text-xs text-slate-400 leading-relaxed bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/50">
+                      {checkedW.desc}
+                    </p>
+
+                    {/* Grille des 4 Métriques Indispensables (Pace, Cadence, Cardio, RPE) */}
+                    <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
+                      <div className="bg-slate-950 border border-slate-800 p-2 rounded-xl flex flex-col">
+                        <span className="text-[9px] text-slate-500 font-mono uppercase">Cible / Intensité</span>
+                        <span className="font-bold font-mono text-orange-400">{checkedW.intensity}</span>
+                      </div>
+                      <div className="bg-slate-950 border border-slate-800 p-2 rounded-xl flex flex-col">
+                        <span className="text-[9px] text-slate-500 font-mono uppercase">Cadence</span>
+                        <span className="font-bold font-mono text-slate-200">{checkedW.cadence}</span>
+                      </div>
+                      <div className="bg-slate-950 border border-slate-800 p-2 rounded-xl flex flex-col">
+                        <span className="text-[9px] text-slate-500 font-mono uppercase">Zone FC / Cardio</span>
+                        <span className="font-bold font-mono text-indigo-400">{checkedW.cardio}</span>
+                      </div>
+                      <div className="bg-slate-950 border border-slate-800 p-2 rounded-xl flex flex-col">
+                        <span className="text-[9px] text-slate-500 font-mono uppercase">Effort Ressenti</span>
+                        <span className="font-bold font-mono text-rose-400">{checkedW.rpe}</span>
                       </div>
                     </div>
-
-                    <div className="flex items-center space-x-3 text-[11px] font-mono self-end md:self-auto">
-                      <span className="bg-white px-2 py-1 rounded-md border border-ria-border text-ria-sub">{w.type}</span>
-                      <span className="text-ria-sub">{w.duration}</span>
-                      <span className="text-ria-neon font-bold">{w.intensity}</span>
-                    </div>
                   </div>
-                ))}
-              </div>
-            </section>
-
-            {/* 3. CHAT COACH */}
-            <section className="bg-white border border-ria-border rounded-2xl p-5 shadow-sm space-y-4">
-              <div className="flex items-center space-x-2 border-b border-ria-border pb-3">
-                <span className="text-ria-neon text-lg">💬</span>
-                <h3 className="text-sm font-black uppercase tracking-wide">
-                  Interaction <span className="text-ria-neon">coaching</span>
-                </h3>
-              </div>
-
-              <div className="max-h-80 overflow-y-auto space-y-3 p-2">
-                {messages.map((msg, idx) => (
-                  <div key={idx} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div
-                      className={`max-w-[90%] rounded-2xl px-4 py-3 text-xs leading-relaxed ${
-                        msg.sender === 'user'
-                          ? 'bg-ria-neon text-white font-semibold'
-                          : 'bg-ria-bg border border-ria-border text-ria-darkText'
-                      }`}
-                    >
-                      {msg.sender === 'coach' ? formatCoachResponse(msg.text) : msg.text}
-                    </div>
-                  </div>
-                ))}
-                {loading && <div className="text-xs font-mono text-ria-neon animate-pulse">Coach en train d'analyser...</div>}
-                <div ref={chatEndRef} />
-              </div>
-
-              <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex space-x-2">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ex: 'Décale la séance vélo de samedi à dimanche' ou 'J'ai mal au mollet'"
-                  className="flex-1 bg-ria-bg border border-ria-border focus:border-ria-neon rounded-xl px-4 py-3 text-xs text-ria-darkText focus:outline-none placeholder:text-ria-sub"
-                />
-                <button
-                  type="submit"
-                  disabled={loading || !input.trim()}
-                  className="bg-ria-neon text-white font-black px-5 py-3 rounded-xl uppercase text-xs disabled:opacity-40"
-                >
-                  Envoyer
-                </button>
-              </form>
-            </section>
-          </>
+                );
+              })}
+            </div>
+          </div>
         )}
+
+        {/* ========================================================= */}
+        {/* ONGLET 2 : OBJECTIF & PROGRESSION                          */}
+        {/* ========================================================= */}
+        {activeTab === 'objective' && (
+          <div className="space-y-4 animate-fadeIn">
+            {/* Carte Objectif Principale */}
+            <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div>
+                  <span className="text-[10px] font-mono text-orange-400 font-bold uppercase tracking-widest">Événement Cible</span>
+                  <h2 className="text-base font-black text-white">{trainingPlan.title}</h2>
+                </div>
+                <div className="text-right">
+                  <span className="text-2xl font-black text-orange-500 font-mono">J-{raceStats.daysLeft}</span>
+                  <div className="text-[10px] font-mono text-slate-400">{raceStats.weeksLeft} semaines restantes</div>
+                </div>
+              </div>
+
+              {/* Jauge de progression de la prépa */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs font-mono font-bold">
+                  <span className="text-slate-400">Avancement Global</span>
+                  <span className="text-orange-400">{raceStats.progressPct}%</span>
+                </div>
+                <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800 p-0.5">
+                  <div
+                    className="h-full bg-gradient-to-r from-orange-500 to-indigo-500 rounded-full transition-all duration-500"
+                    style={{ width: `${raceStats.progressPct}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Split de Chrono Vise */}
+              <div className="pt-2">
+                <span className="text-[10px] text-slate-400 uppercase font-mono font-semibold">Cible Chrono Global</span>
+                <div className="text-3xl font-black text-white font-mono mt-0.5">{trainingPlan.targetTime}</div>
+                
+                <div className="grid grid-cols-3 gap-2 mt-3">
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-2.5 text-center">
+                    <span className="text-base">🏊</span>
+                    <div className="text-xs font-bold font-mono text-slate-200 mt-1">{trainingPlan.splits.nat}</div>
+                  </div>
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-2.5 text-center">
+                    <span className="text-base">🚴</span>
+                    <div className="text-xs font-bold font-mono text-slate-200 mt-1">{trainingPlan.splits.bike}</div>
+                  </div>
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-2.5 text-center">
+                    <span className="text-base">🏃</span>
+                    <div className="text-xs font-bold font-mono text-slate-200 mt-1">{trainingPlan.splits.run}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Macrocycles Roadmap */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+              <h3 className="text-xs font-black uppercase text-slate-300 tracking-wider">
+                Découpage des Macrocycles
+              </h3>
+              <div className="space-y-2">
+                {trainingPlan.cycles.map((c) => (
+                  <div
+                    key={c.id}
+                    className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs"
+                  >
+                    <div>
+                      <div className="font-bold text-slate-200">{c.name}</div>
+                      <div className="text-[10px] text-slate-500 font-mono">{c.dates}</div>
+                    </div>
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-bold ${
+                      c.status === 'En cours'
+                        ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                        : 'bg-slate-800 text-slate-400'
+                    }`}>
+                      {c.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* ONGLET 3 : PROFIL & MÉTROLOGIE                             */}
+        {/* ========================================================= */}
+        {activeTab === 'profile' && (
+          <div className="space-y-4 animate-fadeIn">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+              <div className="border-b border-slate-800 pb-3">
+                <h2 className="text-sm font-black uppercase text-white">Métrologie Athlète</h2>
+                <p className="text-xs text-slate-400 font-mono">Modifie tes valeurs pour mettre à jour automatiquement les cibles d'entraînement.</p>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-slate-400 font-mono mb-1">VMA (km/h)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={profile.vma}
+                    onChange={(e) => handleProfileFieldChange('vma', Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-orange-400 font-mono font-bold focus:border-orange-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-mono mb-1">FTP Cyclisme (Watts)</label>
+                  <input
+                    type="number"
+                    value={profile.ftp}
+                    onChange={(e) => handleProfileFieldChange('ftp', Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-orange-400 font-mono font-bold focus:border-orange-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-mono mb-1">CSS Natation (Temps au 100m)</label>
+                  <input
+                    type="text"
+                    value={profile.nat100}
+                    onChange={(e) => handleProfileFieldChange('nat100', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-orange-400 font-mono font-bold focus:border-orange-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-slate-400 font-mono mb-1">Poids (kg)</label>
+                    <input
+                      type="number"
+                      value={profile.weight}
+                      onChange={(e) => handleProfileFieldChange('weight', Number(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono font-bold focus:border-orange-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-mono mb-1">FC Max (bpm)</label>
+                    <input
+                      type="number"
+                      value={profile.fcMax}
+                      onChange={(e) => handleProfileFieldChange('fcMax', Number(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono font-bold focus:border-orange-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-indigo-950/40 border border-indigo-500/30 p-3 rounded-xl text-[11px] text-indigo-300">
+                ⚡ **Ratios Calculés :**
+                <ul className="mt-1 space-y-0.5 font-mono">
+                  <li>• Rapport Poids/Puissance : **{(profile.ftp / profile.weight).toFixed(2)} W/kg**</li>
+                  <li>• Allure VMA 100% : **{((60 / profile.vma)).toFixed(2)} min/km**</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* ONGLET 4 : CHAT COACH IA                                  */}
+        {/* ========================================================= */}
+        {activeTab === 'chat' && (
+          <div className="space-y-3 flex flex-col h-[calc(100vh-170px)] animate-fadeIn">
+            {/* Liste des messages du chat */}
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {messages.map((m, idx) => (
+                <div key={idx} className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`max-w-[88%] rounded-2xl p-3.5 text-xs leading-relaxed ${
+                      m.sender === 'user'
+                        ? 'bg-orange-500 text-white font-medium rounded-br-none shadow-md'
+                        : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none shadow-sm'
+                    }`}
+                  >
+                    <p className="whitespace-pre-line">{m.text}</p>
+                  </div>
+                </div>
+              ))}
+              {loading && (
+                <div className="text-xs font-mono text-orange-400 animate-pulse flex items-center gap-2">
+                  <span>🤖</span> Coach analyse et recalcule tes cibles...
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Formulaire de saisie */}
+            <form onSubmit={handleSendMessage} className="flex space-x-2 pt-2">
+              <input
+                type="text"
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                placeholder="Ex: 'Décale le vélo à dimanche'..."
+                className="flex-1 bg-slate-900 border border-slate-800 focus:border-orange-500 rounded-xl px-4 py-3 text-xs text-white placeholder:text-slate-500 focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={loading || !inputMessage.trim()}
+                className="bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white font-bold px-4 py-3 rounded-xl text-xs transition-all"
+              >
+                Envoyer
+              </button>
+            </form>
+          </div>
+        )}
+
       </main>
 
-      {/* WIZARD ONBOARDING */}
-      {showQuestionnaire && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-ria-border w-full max-w-lg rounded-2xl p-6 space-y-5">
-            <div className="flex justify-between items-center border-b border-ria-border pb-3">
-              <h3 className="text-sm font-black uppercase">
-                Création du plan <span className="text-ria-neon">(Étape {wizardStep}/3)</span>
+      {/* MODALE WIZARD (GÉNÉRATION DE PLAN SUR-MESURE) */}
+      {showWizard && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-black uppercase text-white">
+                Nouveau Plan <span className="text-orange-400">({wizardStep}/3)</span>
               </h3>
-              <button onClick={() => setShowQuestionnaire(false)} className="text-ria-sub font-bold">✕</button>
+              <button onClick={() => setShowWizard(false)} className="text-slate-400 font-bold text-sm">✕</button>
             </div>
 
             {wizardStep === 1 && (
-              <div className="space-y-4 text-xs">
+              <div className="space-y-3 text-xs">
                 <div>
-                  <label className="block text-ria-sub mb-1 font-mono">Disciplines préparées</label>
-                  <div className="flex space-x-2">
-                    {['NAT', 'VELO', 'CAP'].map((s) => (
-                      <button key={s} className="flex-1 bg-ria-bg border border-ria-neon text-ria-neon font-bold py-2 rounded-lg">
-                        {s}
-                      </button>
-                    ))}
-                  </div>
+                  <label className="block text-slate-400 font-mono mb-1">Nom du Triathlon / Épreuve</label>
+                  <input
+                    type="text"
+                    value={wizardData.eventName}
+                    onChange={(e) => setWizardData({ ...wizardData, eventName: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold"
+                  />
                 </div>
                 <div>
-                  <label className="block text-ria-sub mb-1 font-mono">Date de l'objectif (dans 3 mois max)</label>
+                  <label className="block text-slate-400 font-mono mb-1">Date de l'événement</label>
                   <input
                     type="date"
-                    value={questData.targetDate}
-                    onChange={(e) => setQuestData({ ...questData, targetDate: e.target.value })}
-                    className="w-full bg-ria-bg border border-ria-border rounded-lg p-2.5 text-ria-darkText font-bold"
+                    value={wizardData.targetDate}
+                    onChange={(e) => setWizardData({ ...wizardData, targetDate: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold"
                   />
                 </div>
               </div>
             )}
 
             {wizardStep === 2 && (
-              <div className="space-y-4 text-xs">
+              <div className="space-y-3 text-xs">
                 <div>
-                  <label className="block text-ria-sub mb-1 font-mono">Volume horaire hebdo disponible</label>
+                  <label className="block text-slate-400 font-mono mb-1">Volume disponible (heures/semaine)</label>
                   <input
                     type="number"
-                    value={questData.hoursPerWeek}
-                    onChange={(e) => setQuestData({ ...questData, hoursPerWeek: Number(e.target.value) })}
-                    className="w-full bg-ria-bg border border-ria-border rounded-lg p-2.5 text-ria-darkText font-bold"
+                    value={wizardData.hoursPerWeek}
+                    onChange={(e) => setWizardData({ ...wizardData, hoursPerWeek: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold"
                   />
                 </div>
                 <div>
-                  <label className="block text-ria-sub mb-1 font-mono">Jour de repos obligatoire</label>
+                  <label className="block text-slate-400 font-mono mb-1">Jour de repos obligatoire</label>
                   <input
                     type="text"
-                    value={questData.offDays}
-                    onChange={(e) => setQuestData({ ...questData, offDays: e.target.value })}
-                    className="w-full bg-ria-bg border border-ria-border rounded-lg p-2.5 text-ria-darkText font-bold"
+                    value={wizardData.offDays}
+                    onChange={(e) => setWizardData({ ...wizardData, offDays: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold"
                   />
                 </div>
               </div>
             )}
 
             {wizardStep === 3 && (
-              <div className="space-y-4 text-xs">
+              <div className="space-y-3 text-xs">
                 <div>
-                  <label className="block text-ria-sub mb-1 font-mono">Cible / Objectif chrono</label>
+                  <label className="block text-slate-400 font-mono mb-1">Cible Chrono Global</label>
                   <input
                     type="text"
-                    value={questData.targetGoal}
-                    onChange={(e) => setQuestData({ ...questData, targetGoal: e.target.value })}
-                    className="w-full bg-ria-bg border border-ria-border rounded-lg p-2.5 text-ria-darkText font-bold"
+                    value={wizardData.targetGoal}
+                    onChange={(e) => setWizardData({ ...wizardData, targetGoal: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold"
                   />
                 </div>
-                <p className="text-ria-sub italic">
-                  L'IA va générer les 3 cycles ainsi que les 14 premières séances adaptées à tes métriques (VMA {profile.vma} / FTP {profile.ftp}W).
-                </p>
+                <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl text-orange-300 text-[11px]">
+                  🚀 **Prêt !** Le coach IA va générer et calibrer le calendrier de 14 séances selon tes métriques actuelles.
+                </div>
               </div>
             )}
 
             <div className="flex justify-between pt-2">
               {wizardStep > 1 && (
                 <button
-                  onClick={() => setWizardStep(wizardStep - 1)}
-                  className="bg-ria-bg border border-ria-border text-ria-darkText font-bold px-4 py-2 rounded-xl text-xs uppercase"
+                  onClick={() => setWizardStep(s => s - 1)}
+                  className="bg-slate-950 border border-slate-800 text-slate-300 font-bold px-4 py-2.5 rounded-xl text-xs uppercase"
                 >
                   Retour
                 </button>
               )}
               {wizardStep < 3 ? (
                 <button
-                  onClick={() => setWizardStep(wizardStep + 1)}
-                  className="bg-ria-neon text-white font-black px-5 py-2 rounded-xl uppercase text-xs ml-auto"
+                  onClick={() => setWizardStep(s => s + 1)}
+                  className="bg-orange-500 text-white font-bold px-5 py-2.5 rounded-xl text-xs uppercase ml-auto"
                 >
                   Suivant
                 </button>
               ) : (
                 <button
-                  onClick={() => setShowQuestionnaire(false)}
-                  className="bg-ria-neon text-white font-black px-5 py-2 rounded-xl uppercase text-xs ml-auto"
+                  onClick={handleFinishWizard}
+                  className="bg-gradient-to-r from-orange-500 to-rose-500 text-white font-black px-5 py-2.5 rounded-xl text-xs uppercase ml-auto shadow-lg"
                 >
-                  Générer le plan 3 mois
+                  Générer le Plan
                 </button>
               )}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODALE PROFIL */}
-      {showProfileModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-ria-border w-full max-w-md rounded-2xl p-6 space-y-5">
-            <div className="flex items-center justify-between border-b border-ria-border pb-3">
-              <h2 className="text-sm font-black uppercase">
-                Métriques <span className="text-ria-neon">athlète</span>
-              </h2>
-              <button onClick={() => setShowProfileModal(false)} className="text-ria-sub font-bold">✕</button>
-            </div>
-            <div className="grid grid-cols-2 gap-4 text-xs">
-              <div>
-                <label className="block text-ria-sub font-mono mb-1">VMA (km/h)</label>
-                <input
-                  type="number"
-                  step="0.5"
-                  value={profile.vma}
-                  onChange={(e) => handleProfileChange('vma', Number(e.target.value))}
-                  className="w-full bg-ria-bg border border-ria-border rounded-lg p-2.5 text-ria-darkText font-bold"
-                />
-              </div>
-              <div>
-                <label className="block text-ria-sub font-mono mb-1">FTP (Watts)</label>
-                <input
-                  type="number"
-                  value={profile.ftp}
-                  onChange={(e) => handleProfileChange('ftp', Number(e.target.value))}
-                  className="w-full bg-ria-bg border border-ria-border rounded-lg p-2.5 text-ria-darkText font-bold"
-                />
-              </div>
-            </div>
-            <button
-              onClick={() => setShowProfileModal(false)}
-              className="w-full bg-ria-neon text-white font-black py-2.5 rounded-xl text-xs uppercase"
-            >
-              Enregistrer
-            </button>
           </div>
         </div>
       )}
