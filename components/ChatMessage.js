@@ -11,8 +11,9 @@ function renderInline(text) {
     return part;
   });
 }
+
 export default function ChatMessage({ text, sender }) {
-  const lines = text.split('\n');
+  const lines = String(text || '').split('\n');
   return (
     <div className={`flex ${sender === 'user' ? 'justify-end' : 'justify-start'}`}>
       <div
