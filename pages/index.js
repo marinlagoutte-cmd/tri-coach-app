@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 
 export default function Home() {
-  // 1. État du profil avec valeurs par défaut
   const [profile, setProfile] = useState({
     name: 'Marin',
     vma: 20,
@@ -16,7 +15,6 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const chatEndRef = useRef(null);
 
-  // 2. Charger le profil et l'historique depuis le LocalStorage au démarrage
   useEffect(() => {
     const savedProfile = localStorage.getItem('tri_coach_profile');
     if (savedProfile) {
@@ -29,37 +27,34 @@ export default function Home() {
     } else {
       setMessages([{
         sender: 'coach',
-        text: "Salut Marin ! Ton profil est chargé. On part sur du direct et du cash : pas de volume poubelle. Qu'est-ce qu'on travaille aujourd'hui ?"
+        text: "Salut Marin ! Ton profil est chargé (VMA 20 km/h | FTP 350W). On part sur du direct et du cash. Donne-moi ta cible d'entraînement et je te sors une séance structurée en tableau."
       }]);
     }
   }, []);
 
-  // Sauvegarder les messages quand ils changent
   useEffect(() => {
     if (messages.length > 0) {
       localStorage.setItem('tri_coach_chat', JSON.stringify(messages));
     }
   }, [messages]);
 
-  // Auto-scroll vers le bas
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  // Save profile
   const handleProfileChange = (key, value) => {
     const updated = { ...profile, [key]: value };
     setProfile(updated);
     localStorage.setItem('tri_coach_profile', JSON.stringify(updated));
   };
 
-  const sendMessage = async (customText) => {
-    const textToSend = customText || input;
-    if (!textToSend.trim() || loading) return;
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return;
 
+    const textToSend = input;
     const newMessages = [...messages, { sender: 'user', text: textToSend }];
     setMessages(newMessages);
-    if (!customText) setInput('');
+    setInput('');
     setLoading(true);
 
     try {
@@ -68,7 +63,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: textToSend,
-          profile: profile // On envoie les vraies métriques ajustées !
+          profile: profile
         })
       });
 
@@ -92,10 +87,63 @@ export default function Home() {
     }
   };
 
+  // Convertisseur sommaire de tableaux Markdown vers HTML propre avec style Ultra Tour de l'Aria
+  const formatCoachResponse = (text) => {
+    return text.split('\n').map((line, i) => {
+      // Détection des lignes de tableaux Markdown
+      if (line.trim().startsWith('|')) {
+        const cells = line.split('|').filter((cell) => cell.trim() !== '');
+        if (line.includes('---')) return null; // Ignore les séparateurs Markdown (---)
+
+        const isHeader = i > 0 && text.split('\n')[i - 1]?.includes('---') === false && i < 3;
+
+        return (
+          <div key={i} className="grid grid-cols-4 gap-1 text-xs py-1.5 border-b border-ria-border font-mono">
+            {cells.map((c, cellIdx) => (
+              <div
+                key={cellIdx}
+                className={`${
+                  isHeader
+                    ? 'text-ria-neon font-bold uppercase text-[10px]'
+                    : 'text-gray-200'
+                } px-1 overflow-hidden text-ellipsis`}
+              >
+                {c.trim()}
+              </div>
+            ))}
+          </div>
+        );
+      }
+
+      // Formatage des titres ou listes
+      if (line.startsWith('#') || line.startsWith('**')) {
+        return (
+          <p key={i} className="font-bold text-ria-neon mt-3 mb-1 uppercase text-xs tracking-wider">
+            {line.replace(/[#*]/g, '').trim()}
+          </p>
+        );
+      }
+
+      if (line.startsWith('- ') || line.startsWith('* ')) {
+        return (
+          <li key={i} className="ml-4 text-xs text-gray-300 list-disc my-0.5">
+            {line.replace(/^[-*]\s*/, '')}
+          </li>
+        );
+      }
+
+      return line.trim() ? (
+        <p key={i} className="my-1 text-xs text-gray-200 leading-relaxed">
+          {line}
+        </p>
+      ) : null;
+    });
+  };
+
   return (
     <div className="flex flex-col h-screen bg-ria-bg text-gray-100 font-sans antialiased selection:bg-ria-neon selection:text-ria-darkText">
       
-      {/* HEADER RIA STYLE WITH QUICK STATS */}
+      {/* HEADER RIA */}
       <header className="flex items-center justify-between px-5 py-4 bg-ria-card/90 backdrop-blur-md border-b border-ria-border sticky top-0 z-10">
         <div className="flex items-center space-x-3">
           <div className="w-3 h-3 rounded-full bg-ria-neon animate-pulse" />
@@ -104,7 +152,6 @@ export default function Home() {
           </h1>
         </div>
 
-        {/* Bouton de métriques pour ouvrir la modale */}
         <button
           onClick={() => setShowProfileModal(true)}
           className="flex items-center space-x-2 text-xs font-mono bg-ria-bg px-3 py-1.5 rounded-full border border-ria-border hover:border-ria-neon transition-colors"
@@ -118,7 +165,7 @@ export default function Home() {
         </button>
       </header>
 
-      {/* ZONE DE CHAT */}
+      {/* CHAT AREA */}
       <main className="flex-1 overflow-y-auto p-4 space-y-4 max-w-3xl mx-auto w-full">
         {messages.map((msg, idx) => (
           <div
@@ -126,18 +173,18 @@ export default function Home() {
             className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[88%] rounded-2xl px-5 py-3.5 leading-relaxed text-sm ${
+              className={`max-w-[92%] rounded-2xl px-5 py-3.5 leading-relaxed text-sm ${
                 msg.sender === 'user'
                   ? 'bg-ria-neon text-ria-darkText font-semibold rounded-br-none shadow-lg shadow-ria-neon/10'
-                  : 'bg-ria-card border border-ria-border text-gray-200 rounded-bl-none whitespace-pre-line'
+                  : 'bg-ria-card border border-ria-border text-gray-200 rounded-bl-none overflow-x-auto'
               }`}
             >
               {msg.sender === 'coach' && (
-                <div className="text-[10px] font-black uppercase tracking-widest text-ria-neon mb-1">
+                <div className="text-[10px] font-black uppercase tracking-widest text-ria-neon mb-2">
                   COACH D3
                 </div>
               )}
-              {msg.text}
+              {msg.sender === 'coach' ? formatCoachResponse(msg.text) : msg.text}
             </div>
           </div>
         ))}
@@ -148,32 +195,15 @@ export default function Home() {
               <span className="animate-bounce">●</span>
               <span className="animate-bounce [animation-delay:0.2s]">●</span>
               <span className="animate-bounce [animation-delay:0.4s]">●</span>
-              <span className="ml-2 text-gray-400">Analyse de la séance...</span>
+              <span className="ml-2 text-gray-400">Analyse et structuration du tableau...</span>
             </div>
           </div>
         )}
         <div ref={chatEndRef} />
       </main>
 
-      {/* QUICK ACTIONS & BARRE DE SAISIE */}
-      <footer className="p-4 bg-ria-card/90 border-t border-ria-border max-w-3xl mx-auto w-full space-y-3">
-        <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none text-xs">
-          {[
-            "⚡ Séance CAP 5km D3",
-            "🚴‍♂️ PMA / Seuil Vélo",
-            "🏊‍♂️ Spé Natation 100m",
-            "🛡️ Bilan Fatigue / RPE"
-          ].map((prompt, i) => (
-            <button
-              key={i}
-              onClick={() => sendMessage(prompt)}
-              className="px-3 py-1.5 bg-ria-bg border border-ria-border hover:border-ria-neon/50 text-gray-300 rounded-lg whitespace-nowrap transition-colors"
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
-
+      {/* SAISIE */}
+      <footer className="p-4 bg-ria-card/90 border-t border-ria-border max-w-3xl mx-auto w-full">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -185,7 +215,7 @@ export default function Home() {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Pose ta question ou demande une séance..."
+            placeholder="Ex: Donne-moi une séance PMA vélo de 1h"
             className="flex-1 bg-ria-bg border border-ria-border focus:border-ria-neon rounded-xl px-4 py-3 text-sm text-white focus:outline-none placeholder-gray-500 transition-all"
           />
           <button
@@ -198,7 +228,7 @@ export default function Home() {
         </form>
       </footer>
 
-      {/* MODALE REGLAGES PROFIL ATHLÈTE */}
+      {/* MODALE REGLAGES */}
       {showProfileModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-ria-card border border-ria-border w-full max-w-md rounded-2xl p-6 space-y-5">
