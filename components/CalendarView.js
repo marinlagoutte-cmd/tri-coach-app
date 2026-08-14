@@ -62,7 +62,7 @@ export default function CalendarView({
         </span>
       </div>
 
-      <div className="grid grid-flow-col auto-cols-[minmax(125px,1fr)] sm:grid-flow-row sm:grid-cols-7 gap-2 overflow-x-auto pb-2 snap-x snap-mandatory sm:overflow-visible scrollbar-none">
+      <div className="grid grid-flow-col auto-cols-[minmax(168px,1fr)] sm:grid-flow-row sm:grid-cols-7 gap-3 overflow-x-auto pb-2 snap-x snap-mandatory sm:overflow-visible scrollbar-none">
         {daysOfWeek.map((dayName) => {
           const workout = workoutList.find((w) => w.day?.toLowerCase() === dayName.toLowerCase());
           const isRest = !workout || workout.type === 'REPOS';
@@ -73,27 +73,27 @@ export default function CalendarView({
               type="button"
               disabled={!workout}
               onClick={() => workout && onSelectWorkout?.(workout)}
-              className={`snap-start text-left bg-slate-950 border rounded-xl p-2.5 flex flex-col justify-between min-h-[130px] transition-all ${
+              className={`snap-start text-left bg-slate-950 border rounded-xl p-3 flex flex-col justify-between min-h-[150px] overflow-hidden transition-all ${
                 workout
                   ? 'border-slate-800 hover:border-orange-500/50 active:scale-[0.98] cursor-pointer'
                   : 'border-slate-900/60 opacity-50 cursor-default'
               }`}
             >
-              <div>
-                <div className="flex justify-between items-start gap-1 mb-1.5">
-                  <span className="text-[10px] font-bold uppercase text-slate-500">{dayName.slice(0, 3)}</span>
+              <div className="min-w-0">
+                <div className="flex justify-between items-center gap-1.5 mb-2">
+                  <span className="text-[10px] font-bold uppercase text-slate-500 shrink-0">{dayName.slice(0, 3)}</span>
                   {workout && (
-                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border shrink-0 uppercase font-mono ${badgeClass(workout.type)}`}>
-                      {workout.type === 'C.A.P' ? 'CAP' : workout.type?.slice(0, 4)}
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 whitespace-nowrap uppercase font-mono leading-none ${badgeClass(workout.type)}`}>
+                      {shortLabel(workout.type)}
                     </span>
                   )}
                 </div>
 
                 {workout ? (
-                  <div>
-                    <p className="text-[11px] font-bold text-white line-clamp-2 leading-tight">{workout.title}</p>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white leading-snug line-clamp-2 break-words">{workout.title}</p>
                     {!isRest && workout.intensity && (
-                      <p className="text-[10px] text-orange-400 font-mono mt-1 truncate">{workout.intensity}</p>
+                      <p className="text-[10px] text-orange-400 font-mono mt-1.5 leading-snug line-clamp-1 break-words">{workout.intensity}</p>
                     )}
                   </div>
                 ) : (
@@ -102,10 +102,10 @@ export default function CalendarView({
               </div>
 
               {workout && (
-                <div className="mt-2 pt-1.5 border-t border-slate-900 flex justify-between items-center text-[9px] font-mono text-slate-400">
-                  <span>{workout.duration}</span>
+                <div className="mt-2 pt-1.5 border-t border-slate-900 flex justify-between items-center gap-1.5 text-[9px] font-mono text-slate-400">
+                  <span className="truncate">{workout.duration}</span>
                   {workout.modified && (
-                    <span className="text-orange-400 font-bold" title="Séance modifiée via chat">
+                    <span className="text-orange-400 font-bold shrink-0" title="Séance modifiée via chat">
                       ● mod
                     </span>
                   )}
