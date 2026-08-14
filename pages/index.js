@@ -65,7 +65,7 @@ export default function Home() {
     fcRest: 48
   });
 
-  // 2. PLAN D'ENTRAÎNEMENT & MAcroCYCLES
+  // 2. PLAN D'ENTRAÎNEMENT & MACROCYCLES
   const [trainingPlan, setTrainingPlan] = useState({
     title: 'Triathlon M - Vendôme',
     date: '2026-05-24',
@@ -312,7 +312,7 @@ export default function Home() {
       <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4">
 
         {/* ========================================================= */}
-        {/* ONGLET 1 : CALENDRIER DES SÉANCES                          */}
+        {/* ONGLET 1 : CALENDRIER DES SÉANCES                         */}
         {/* ========================================================= */}
         {activeTab === 'calendar' && (
           <div className="space-y-4 animate-fadeIn">
@@ -426,7 +426,7 @@ export default function Home() {
         )}
 
         {/* ========================================================= */}
-        {/* ONGLET 2 : OBJECTIF & PROGRESSION                          */}
+        {/* ONGLET 2 : OBJECTIF & PROGRESSION                         */}
         {/* ========================================================= */}
         {activeTab === 'objective' && (
           <div className="space-y-4 animate-fadeIn">
@@ -509,7 +509,7 @@ export default function Home() {
         )}
 
         {/* ========================================================= */}
-        {/* ONGLET 3 : PROFIL & MÉTROLOGIE                             */}
+        {/* ONGLET 3 : PROFIL & MÉTROLOGIE                            */}
         {/* ========================================================= */}
         {activeTab === 'profile' && (
           <div className="space-y-4 animate-fadeIn">
@@ -618,13 +618,13 @@ export default function Home() {
                 type="text"
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                placeholder="Ex: 'Décale le vélo à dimanche'..."
-                className="flex-1 bg-slate-900 border border-slate-800 focus:border-orange-500 rounded-xl px-4 py-3 text-xs text-white placeholder:text-slate-500 focus:outline-none"
+                placeholder="Ex: Décale ma séance de vélo à jeudi..."
+                className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:border-orange-500 focus:outline-none"
               />
               <button
                 type="submit"
-                disabled={loading || !inputMessage.trim()}
-                className="bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white font-bold px-4 py-3 rounded-xl text-xs transition-all"
+                disabled={loading}
+                className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md active:scale-95"
               >
                 Envoyer
               </button>
@@ -634,104 +634,79 @@ export default function Home() {
 
       </main>
 
-      {/* MODALE WIZARD (GÉNÉRATION DE PLAN SUR-MESURE) */}
+      {/* MODAL WIZARD / NOUVEAU PLAN */}
       {showWizard && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <h3 className="text-sm font-black uppercase text-white">
-                Nouveau Plan <span className="text-orange-400">({wizardStep}/3)</span>
-              </h3>
-              <button onClick={() => setShowWizard(false)} className="text-slate-400 font-bold text-sm">✕</button>
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <span className="text-[10px] font-mono text-orange-400 font-bold uppercase tracking-wider">Assistant IA</span>
+                <h3 className="text-sm font-black text-white">Génération d'un Nouveau Plan</h3>
+              </div>
+              <button
+                onClick={() => setShowWizard(false)}
+                className="text-slate-400 hover:text-white text-lg font-bold px-2 py-1"
+              >
+                ✕
+              </button>
             </div>
 
-            {wizardStep === 1 && (
-              <div className="space-y-3 text-xs">
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-400 font-mono mb-1">Nom de l'Objectif / Course</label>
+                <input
+                  type="text"
+                  value={wizardData.eventName}
+                  onChange={(e) => setWizardData({ ...wizardData, eventName: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-medium focus:border-orange-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-slate-400 font-mono mb-1">Nom du Triathlon / Épreuve</label>
-                  <input
-                    type="text"
-                    value={wizardData.eventName}
-                    onChange={(e) => setWizardData({ ...wizardData, eventName: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 font-mono mb-1">Date de l'événement</label>
+                  <label className="block text-slate-400 font-mono mb-1">Date de l'objectif</label>
                   <input
                     type="date"
                     value={wizardData.targetDate}
                     onChange={(e) => setWizardData({ ...wizardData, targetDate: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono focus:border-orange-500 focus:outline-none"
                   />
                 </div>
-              </div>
-            )}
-
-            {wizardStep === 2 && (
-              <div className="space-y-3 text-xs">
                 <div>
-                  <label className="block text-slate-400 font-mono mb-1">Volume disponible (heures/semaine)</label>
+                  <label className="block text-slate-400 font-mono mb-1">Volume (h/semaine)</label>
                   <input
                     type="number"
                     value={wizardData.hoursPerWeek}
                     onChange={(e) => setWizardData({ ...wizardData, hoursPerWeek: Number(e.target.value) })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 font-mono mb-1">Jour de repos obligatoire</label>
-                  <input
-                    type="text"
-                    value={wizardData.offDays}
-                    onChange={(e) => setWizardData({ ...wizardData, offDays: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-orange-400 font-mono font-bold focus:border-orange-500 focus:outline-none"
                   />
                 </div>
               </div>
-            )}
 
-            {wizardStep === 3 && (
-              <div className="space-y-3 text-xs">
-                <div>
-                  <label className="block text-slate-400 font-mono mb-1">Cible Chrono Global</label>
-                  <input
-                    type="text"
-                    value={wizardData.targetGoal}
-                    onChange={(e) => setWizardData({ ...wizardData, targetGoal: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold"
-                  />
-                </div>
-                <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl text-orange-300 text-[11px]">
-                  🚀 **Prêt !** Le coach IA va générer et calibrer le calendrier de 14 séances selon tes métriques actuelles.
-                </div>
+              <div>
+                <label className="block text-slate-400 font-mono mb-1">Objectif Chrono / Temps Visé</label>
+                <input
+                  type="text"
+                  value={wizardData.targetGoal}
+                  onChange={(e) => setWizardData({ ...wizardData, targetGoal: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono focus:border-orange-500 focus:outline-none"
+                />
               </div>
-            )}
+            </div>
 
-            <div className="flex justify-between pt-2">
-              {wizardStep > 1 && (
-                <button
-                  onClick={() => setWizardStep(s => s - 1)}
-                  className="bg-slate-950 border border-slate-800 text-slate-300 font-bold px-4 py-2.5 rounded-xl text-xs uppercase"
-                >
-                  Retour
-                </button>
-              )}
-              {wizardStep < 3 ? (
-                <button
-                  onClick={() => setWizardStep(s => s + 1)}
-                  className="bg-orange-500 text-white font-bold px-5 py-2.5 rounded-xl text-xs uppercase ml-auto"
-                >
-                  Suivant
-                </button>
-              ) : (
-                <button
-                  onClick={handleFinishWizard}
-                  className="bg-gradient-to-r from-orange-500 to-rose-500 text-white font-black px-5 py-2.5 rounded-xl text-xs uppercase ml-auto shadow-lg"
-                >
-                  Générer le Plan
-                </button>
-              )}
+            <div className="pt-2 flex space-x-2">
+              <button
+                onClick={() => setShowWizard(false)}
+                className="flex-1 bg-slate-950 hover:bg-slate-800 text-slate-300 py-3 rounded-xl font-bold text-xs border border-slate-800 transition-all"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleFinishWizard}
+                className="flex-1 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 text-white py-3 rounded-xl font-bold text-xs shadow-lg transition-all"
+              >
+                Générer le Plan
+              </button>
             </div>
           </div>
         </div>
