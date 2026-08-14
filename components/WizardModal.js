@@ -34,7 +34,6 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
     customDistances: { swim: 1.5, bike: 40, run: 10 },
 
     targetTime: '',
-    // Replace single transition by two transitions and per-discipline times
     triathlonTimes: { swim: '', transition_t1: '', bike: '', transition_t2: '', run: '', total: '' },
 
     targetDate: '',
@@ -42,16 +41,16 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
     maxSessionsPerWeek: 4,
     offDays: 'Mercredi',
 
-    // running-specific pace (min per km)
     runningPace: 6.0,
   });
 
-  // custom coherence check for hoursPerWeek vs sessions
   const hoursSessionsWarning = useMemo(() => {
     const hours = Number(formData.hoursPerWeek) || 0;
     const sessions = Number(formData.maxSessionsPerWeek) || 1;
     const avgMinutes = (hours * 60) / sessions;
-    if (avgMinutes < 30) return 'Trop peu de temps par séance en moyenne (< 30 min).';
+    if (avgMinutes < 35) {
+      return `Avec ${hours}h pour ${sessions} séances, ça fait ${Math.round(avgMinutes)} min/séance en moyenne — ça semble difficilement réalisable.`;
+    }
     if (avgMinutes > 300) return 'Trop long par séance en moyenne (> 5 h).';
     return null;
   }, [formData.hoursPerWeek, formData.maxSessionsPerWeek]);
@@ -84,7 +83,6 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
     }
     if (m.endsWith('h')) return parseFloat(m) * 60;
     if (m.endsWith('min')) return parseFloat(m);
-    // fallback parse float as minutes
     return parseFloat(m) || 0;
   };
 
@@ -95,21 +93,8 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
     return h > 0 ? `${h}h${m.toString().padStart(2, '0')}m` : `${m}m`;
   };
 
-  // for triathlon, compute total automatically
-  const computeTriTotal = () => {
-    const swim = hhmmToMinutes(formData.triathlonTimes.swim);
-    const t1 = hhmmToMinutes(formData.triathlonTimes.transition_t1);
-    const bike = hhmmToMinutes(formData.triathlonTimes.bike);
-    const t2 = hhmmToMinutes(formData.triathlonTimes.transition_t2);
-    const run = hhmmToMinutes(formData.triathlonTimes.run);
-    const total = swim + t1 + bike + t2 + run;
-    return total;
-  };
-
-  // when triathlon times change, update total field
   const updateTriField = (key, value) => {
     const next = { ...formData, triathlonTimes: { ...formData.triathlonTimes, [key]: value } };
-    // compute total
     const total = (() => {
       const swim = hhmmToMinutes(next.triathlonTimes.swim);
       const t1 = hhmmToMinutes(next.triathlonTimes.transition_t1);
@@ -122,7 +107,23 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
     setFormData(next);
   };
 
-  // running: pace <-> total time (based on distance)
+  const formatPace = (minutesPerUnit) => {
+    if (!Number.isFinite(minutesPerUnit) || minutesPerUnit <= 0) return '—';
+    const m = Math.floor(minutesPerUnit);
+    const s = Math.round((minutesPerUnit - m) * 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const getDisciplineAllure = (key) => {
+    const timeMin = hhmmToMinutes(formData.triathlonTimes[key]);
+    const distanceKm = Number(formData.customDistances[key]) || 0;
+    if (!timeMin || !distanceKm) return '—';
+    if (key === 'swim') return `${formatPace(timeMin / (distanceKm * 1000 / 100))} /100m`;
+    if (key === 'bike') return `${(distanceKm / (timeMin / 60)).toFixed(1)} km/h`;
+    if (key === 'run') return `${formatPace(timeMin / distanceKm)} /km`;
+    return '—';
+  };
+
   const runningDistanceKm = useMemo(() => {
     if (formData.runningSubtype === 'trail') return Number(formData.trailKm) || 0;
     const map = { '5km': 5, '10km': 10, 'Semi-marathon': 21.0975, Marathon: 42.195 };
@@ -160,14 +161,14 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
         <div className="flex justify-between items-center border-b border-slate-800 pb-4">
           <div>
             <span className="text-[10px] font-mono text-orange-400 uppercase tracking-widest block">Assistant de création</span>
-            <h2 className="text-lg font-bold">Configuration de ton plan d'entraînement</h2>
+            <h2 className="text-lg font-bold font-display">Configuration de ton plan d'entraînement</h2>
           </div>
           <span className="text-xs font-mono text-slate-500 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">Étape {step} / 4</span>
         </div>
 
         <div className="space-y-4">
 
-          {/* STEP 1 */}
+          {/* STEP 1 — À CONSERVER : colle ici ton vrai contenu de step 1 si tu en as un */}
           {step === 1 && (
             <div className="space-y-4">
               <h3 className="text-xs font-black uppercase tracking-wide text-orange-400">1. Profil & discipline</h3>
@@ -175,7 +176,7 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
             </div>
           )}
 
-          {/* STEP 2 same as before ... */}
+          {/* STEP 2 — À CONSERVER : colle ici ton vrai contenu de step 2 si tu en as un */}
 
           {/* STEP 3 : Objectif & prédiction */}
           {step === 3 && (
@@ -191,24 +192,58 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
                 <div className="space-y-2">
                   <label className="text-[10px] text-slate-400 block">Temps visé par discipline (hh:mm)</label>
                   <div className="grid grid-cols-6 gap-2 font-mono text-xs">
-                    <input type="text" placeholder="Nat (ex: 00:30)" value={formData.triathlonTimes.swim} onChange={(e) => updateTriField('swim', e.target.value)} className="col-span-1 bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs" />
-                    <input type="text" placeholder="T1 (ex: 00:02)" value={formData.triathlonTimes.transition_t1} onChange={(e) => updateTriField('transition_t1', e.target.value)} className="col-span-1 bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs" />
-                    <input type="text" placeholder="Vélo (ex: 01:15)" value={formData.triathlonTimes.bike} onChange={(e) => updateTriField('bike', e.target.value)} className="col-span-2 bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs" />
-                    <input type="text" placeholder="T2 (ex: 00:01)" value={formData.triathlonTimes.transition_t2} onChange={(e) => updateTriField('transition_t2', e.target.value)} className="col-span-1 bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs" />
-                    <input type="text" placeholder="Course (ex: 00:45)" value={formData.triathlonTimes.run} onChange={(e) => updateTriField('run', e.target.value)} className="col-span-1 bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs" />
+                    <div className="col-span-1">
+                      <input type="text" placeholder="Nat (ex: 00:30)" value={formData.triathlonTimes.swim} onChange={(e) => updateTriField('swim', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs" />
+                      <span className="text-[9px] text-slate-500 block mt-0.5">{getDisciplineAllure('swim')}</span>
+                    </div>
+                    <div className="col-span-1">
+                      <input type="text" placeholder="T1 (ex: 00:02)" value={formData.triathlonTimes.transition_t1} onChange={(e) => updateTriField('transition_t1', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs" />
+                    </div>
+                    <div className="col-span-2">
+                      <input type="text" placeholder="Vélo (ex: 01:15)" value={formData.triathlonTimes.bike} onChange={(e) => updateTriField('bike', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs" />
+                      <span className="text-[9px] text-slate-500 block mt-0.5">{getDisciplineAllure('bike')}</span>
+                    </div>
+                    <div className="col-span-1">
+                      <input type="text" placeholder="T2 (ex: 00:01)" value={formData.triathlonTimes.transition_t2} onChange={(e) => updateTriField('transition_t2', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs" />
+                    </div>
+                    <div className="col-span-1">
+                      <input type="text" placeholder="Course (ex: 00:45)" value={formData.triathlonTimes.run} onChange={(e) => updateTriField('run', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs" />
+                      <span className="text-[9px] text-slate-500 block mt-0.5">{getDisciplineAllure('run')}</span>
+                    </div>
                     <div className="col-span-6 text-xs text-slate-400">Temps global calculé : <strong className="text-orange-400">{formData.triathlonTimes.total}</strong></div>
                   </div>
                 </div>
               ) : (
                 <div>
                   <label className="text-xs text-slate-400 block mb-1">Chrono cible visé</label>
-                  <div className="flex items-center gap-3">
-                    <input type="text" placeholder="ex: 42 min ou 1h35" value={formData.targetTime} onChange={(e) => setFormData({ ...formData, targetTime: e.target.value })} className="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white font-mono" />
-                    <div className="w-48">
-                      <label className="text-xs text-slate-400 block mb-1">Allure (min/km)</label>
-                      <input type="range" min="3" max="8" step="0.1" value={formData.runningPace} onChange={(e) => setFormData({ ...formData, runningPace: Number(e.target.value) })} className="w-full" />
-                      <div className="text-xs text-slate-400">Allure actuelle : <strong className="text-orange-400">{formData.runningPace.toFixed(2)} min/km</strong></div>
-                      <div className="text-xs text-slate-400">Temps estimé : <strong className="text-orange-400">{minutesToHHMM(runningTotalMinutes)}</strong></div>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">
+                        Allure : <strong className="text-orange-400 font-mono">{formData.runningPace.toFixed(2)} min/km</strong>
+                      </label>
+                      <input
+                        type="range" min="3" max="8" step="0.1"
+                        value={formData.runningPace}
+                        onChange={(e) => {
+                          const pace = Number(e.target.value);
+                          setFormData({ ...formData, runningPace: pace, targetTime: minutesToHHMM(pace * runningDistanceKm) });
+                        }}
+                        className="w-full accent-orange-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">
+                        Temps estimé : <strong className="text-orange-400 font-mono">{minutesToHHMM(runningTotalMinutes)}</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min={Math.max(1, Math.round(3 * runningDistanceKm))}
+                        max={Math.max(2, Math.round(8 * runningDistanceKm))}
+                        step="1"
+                        value={Math.round(runningTotalMinutes)}
+                        onChange={(e) => onRunningTotalChange(Number(e.target.value))}
+                        className="w-full accent-orange-500"
+                      />
                     </div>
                   </div>
                 </div>
@@ -223,8 +258,18 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
 
               <div>
                 <label className="text-xs text-slate-400 block mb-1">Date de l'objectif</label>
-                <input type="date" value={formData.targetDate} onChange={(e) => setFormData({ ...formData, targetDate: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white font-mono" />
-                {formData.targetDate && <div className="text-xs text-slate-400 mt-1">Format: {formatDateFR(formData.targetDate)}</div>}
+                <div className="relative">
+                  <input
+                    type="date"
+                    value={formData.targetDate}
+                    onChange={(e) => setFormData({ ...formData, targetDate: e.target.value })}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <div className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white font-mono pointer-events-none flex justify-between items-center">
+                    <span>{formData.targetDate ? formatDateFR(formData.targetDate) : 'Choisir une date'}</span>
+                    <span className="text-slate-500">📅</span>
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -244,7 +289,6 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
                 </select>
               </div>
 
-              {/* Vérification de cohérence heures/séances + format */}
               {coherenceWarnings.length > 0 && (
                 <div className="bg-rose-950/50 border border-rose-800/80 p-3 rounded-xl text-xs text-rose-300 space-y-1.5">
                   <span className="font-bold block font-mono">⚠️ Alerte de cohérence :</span>
