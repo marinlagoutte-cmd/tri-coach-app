@@ -18,9 +18,13 @@ Profil athlète :
 - VMA: ${profile?.vma || 20} km/h | FTP: ${profile?.ftp || 350} W | Natation 100m: ${profile?.nat100 || '1:38'}
 - Style: Direct, exigeant, cash. Signale immédiatement le sur-entraînement et le volume poubelle.
 
-Règles strictes :
-1. Donner des INTENTIONS DE NAGE et RPE au lieu de chronos fixes.
-2. Détailler les récups exactes à vélo.
+Règles de formatage STRICTES pour la lisibilité :
+1. Présente TOUJOURS le corps principal de la séance sous forme de TABLEAU MARKDOWN propre avec les colonnes suivantes :
+   | Bloc / Partie | Exercice / Contenu | Intensité (RPE / Watts / %VMA) | Récupération |
+2. Utilise des listes à puces claires pour l'Échauffement et le Retour au calme.
+3. Donne des INTENTIONS DE NAGE et RPE au lieu de chronos fixes en natation.
+4. Détailler les récups exactes à vélo.
+5. Sois très concis et lisible en un coup d'œil sur mobile.
 
 Message athlète : ${message}
 `;
@@ -31,11 +35,10 @@ Message athlète : ${message}
   let lastError = null;
 
   for (const model of modelsToTry) {
-    // Jusqu'à 3 tentatives par modèle, avec backoff exponentiel (500ms, 1s, 2s)
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000); // 15s max par appel
+        const timeout = setTimeout(() => controller.abort(), 15000);
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
         const response = await fetch(url, {
@@ -48,20 +51,16 @@ Message athlète : ${message}
 
         const data = await response.json();
 
-        // Succès
         if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
           return res.status(200).json({ reply: data.candidates[0].content.parts[0].text });
         }
 
         if (data.error) {
           lastError = `[${model}] ${data.error.code} — ${data.error.message}`;
-
-          // 503 (surcharge) ou 429 (quota) : ça vaut le coup de réessayer ce même modèle
           if (data.error.code === 503 || data.error.code === 429) {
-            await sleep(500 * Math.pow(2, attempt)); // 500ms → 1s → 2s
+            await sleep(500 * Math.pow(2, attempt));
             continue;
           }
-          // 404 (modèle introuvable) ou autre erreur définitive : inutile de réessayer, passe à l'alias suivant
           break;
         }
       } catch (err) {
@@ -74,22 +73,4 @@ Message athlète : ${message}
   return res.status(200).json({
     reply: `❌ Le coach est temporairement indisponible (surcharge Google). Réessaie dans une minute. Détail technique : ${lastError}`
   });
-  const prompt = `
-Tu es un coach expert en triathlon (format Sprint / D3).
-Profil athlète :
-- Nom: ${profile?.name || 'Marin'}
-- Poids: ${profile?.weight || 90} kg
-- VMA: ${profile?.vma || 20} km/h | FTP: ${profile?.ftp || 350} W | Natation 100m: ${profile?.nat100 || '1:38'}
-- Style: Direct, exigeant, cash. Signale immédiatement le sur-entraînement et le volume poubelle.
-
-Règles de formatage STRICTES pour la lisibilité :
-1. Présente TOUJOURS le corps de la séance sous forme de TABLEAU MARKDOWN propre avec les colonnes :
-   | Bloc / Partie | Exercice / Contenu | Intensité (RPE / Watts / %VMA) | Récupération |
-2. Utilise des listes à puces claires pour l'Échauffement et le Retour au calme.
-3. Donne des INTENTIONS DE NAGE et RPE au lieu de chronos fixes en natation.
-4. Détailler les récups exactes à vélo.
-5. Sois très concis et lisible en un coup d'œil sur mobile.
-
-Message athlète : ${message}
-`;
 }
