@@ -1,28 +1,26 @@
+import { chatWithCoach } from '../../lib/gemini';
+import { mergeWorkoutPatches } from '../../lib/workouts';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Méthode non autorisée' });
 
-  const { message, profile, workouts } = req.body;
+  const { message, profile, workouts, trainingPlan } = req.body || {};
+  if (!message || !String(message).trim()) {
+    return res.status(400).json({ reply: 'Écris-moi un message pour que je puisse t\'aider.', updatedWorkouts: workouts });
+  }
 
   try {
-    // Appel à Gemini / API LLM
-    // On exige le retour des métriques complètes : intensity, cadence, cardio, rpe, duration, title, desc
-    
-    // Exemple de structure JSON attendue dans la réponse API :
-    /*
-      {
-        "reply": "J'ai bien décalé ta séance...",
-        "updatedWorkouts": {
-          "N": [ ... ],
-          "N+1": [ ... ]
-        }
-      }
-    */
-
-    return res.status(200).json({ 
-      reply: "Séance mise à jour avec succès !", 
-      updatedWorkouts: workouts 
-    });
+    const { reply, patches } = await chatWithCoach({ message, profile, workouts, trainingPlan });
+    const updatedWorkouts = mergeWorkoutPatches(workouts, patches, profile);
+    return res.status(200).json({ reply, updatedWorkouts });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    const isNoKey = /Clé API Gemini manquante/.test(error.message || '');
+    console.error('chat error:', error);
+    return res.status(200).json({
+      reply: isNoKey
+        ? "⚠️ Le coach IA n'est pas encore connecté : ajoute GOOGLE_GENERATIVE_AI_API_KEY dans ton fichier .env.local."
+        : "Je n'ai pas réussi à traiter ta demande, réessaie dans un instant.",
+      updatedWorkouts: workouts,
+    });
   }
 }
