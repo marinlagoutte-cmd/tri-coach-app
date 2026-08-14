@@ -16,6 +16,13 @@ module.exports = {
           sub: '#64748B',
         },
       },
+      spacing: {
+        'safe-b': 'env(safe-area-inset-bottom)',
+        'safe-t': 'env(safe-area-inset-top)',
+      },
+      minHeight: {
+        tap: '44px',
+      },
     },
   },
   plugins: [],
