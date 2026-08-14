@@ -3,6 +3,7 @@ import CalendarView from '../components/CalendarView';
 import ChatMessage from '../components/ChatMessage';
 import WorkoutDetail from '../components/WorkoutDetail';
 import WizardModal from '../components/WizardModal';
+import ProfileHealth from '../components/ProfileHealth';
 import { STORAGE_KEYS, loadFromStorage, saveToStorage } from '../lib/storage';
 import { DEFAULT_PROFILE, DEFAULT_TRAINING_PLAN, DEFAULT_WORKOUTS } from '../lib/defaults';
 import { computeRaceStats } from '../lib/workouts';
@@ -34,6 +35,7 @@ export default function Home() {
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [trainingPlan, setTrainingPlan] = useState(DEFAULT_TRAINING_PLAN);
   const [workouts, setWorkouts] = useState(DEFAULT_WORKOUTS);
+  const [sportType, setSportType] = useState('triathlon');
 
   const [showWizard, setShowWizard] = useState(false);
   const [wizardSubmitting, setWizardSubmitting] = useState(false);
@@ -54,14 +56,16 @@ export default function Home() {
     setTrainingPlan(loadFromStorage(STORAGE_KEYS.plan, DEFAULT_TRAINING_PLAN));
     setWorkouts(loadFromStorage(STORAGE_KEYS.workouts, DEFAULT_WORKOUTS));
     setMessages(loadFromStorage(STORAGE_KEYS.chat, [WELCOME_MESSAGE]));
+    setSportType(loadFromStorage(STORAGE_KEYS.sportType, 'triathlon'));
     setHydrated(true);
   }, []);
 
-  // --- PERSISTANCE (uniquement après hydratation pour ne pas écraser avec les valeurs par défaut) ---
+  // --- PERSISTANCE ---
   useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.profile, profile); }, [profile, hydrated]);
   useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.plan, trainingPlan); }, [trainingPlan, hydrated]);
   useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.workouts, workouts); }, [workouts, hydrated]);
   useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.chat, messages); }, [messages, hydrated]);
+  useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.sportType, sportType); }, [sportType, hydrated]);
 
   useEffect(() => {
     if (activeTab === 'chat') {
@@ -76,10 +80,6 @@ export default function Home() {
     if (sportFilter === 'ALL') return list;
     return list.filter((w) => w.type?.toUpperCase().includes(sportFilter));
   }, [workouts, activeWeek, sportFilter]);
-
-  const handleProfileFieldChange = (key, value) => {
-    setProfile((prev) => ({ ...prev, [key]: value }));
-  };
 
   // --- GÉNÉRATION D'UN NOUVEAU PLAN VIA L'ASSISTANT ---
   const handleWizardComplete = async (wizardData) => {
@@ -96,6 +96,7 @@ export default function Home() {
 
       setTrainingPlan(data.trainingPlan);
       setWorkouts(data.workouts);
+      setSportType(wizardData.sportType || 'triathlon');
       setShowWizard(false);
       setActiveTab('calendar');
 
@@ -147,22 +148,22 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col pb-20 md:pb-6 antialiased">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-body flex flex-col pb-20 md:pb-6 antialiased">
 
       {/* HEADER */}
       <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-orange-500 to-indigo-600 flex items-center justify-center font-black text-xs text-white shadow-lg shadow-orange-500/20">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-ria-neon to-ria-ocean flex items-center justify-center font-black text-xs text-white shadow-lg shadow-orange-500/20">
             TC
           </div>
-          <h1 className="text-sm font-black tracking-tight text-white flex items-center gap-1.5">
+          <h1 className="text-sm font-black tracking-tight text-white flex items-center gap-1.5 font-display">
             TRI<span className="text-orange-500">COACH</span>
           </h1>
         </div>
 
         <button
           onClick={() => { setWizardError(null); setShowWizard(true); }}
-          className="text-xs font-bold bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 text-white px-3 py-1.5 rounded-xl shadow-md transition-all flex items-center gap-1 active:scale-95"
+          className="text-xs font-bold bg-gradient-to-r from-ria-neon to-ria-coral hover:from-orange-600 hover:to-rose-600 text-white px-3 py-1.5 rounded-xl shadow-md transition-all flex items-center gap-1 active:scale-95"
         >
           <span>+</span>
           <span className="hidden sm:inline">Nouveau</span> Plan
@@ -252,7 +253,7 @@ export default function Home() {
           <div className="space-y-4">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
               <span className="text-[10px] font-mono text-orange-400 uppercase tracking-widest block">Objectif en cours</span>
-              <h2 className="text-lg font-black text-white">{trainingPlan.title}</h2>
+              <h2 className="text-lg font-black text-white font-display">{trainingPlan.title}</h2>
               <p className="text-xs text-slate-400 font-mono">{trainingPlan.date}</p>
 
               <div className="grid grid-cols-3 gap-2 text-center pt-2">
@@ -304,64 +305,7 @@ export default function Home() {
 
         {/* ONGLET PROFIL */}
         {activeTab === 'profile' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
-            <span className="text-[10px] font-mono text-orange-400 uppercase tracking-widest block">Profil physiologique</span>
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <label className="block text-slate-400 font-mono mb-1">VMA (km/h)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={profile.vma}
-                  onChange={(e) => handleProfileFieldChange('vma', Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono font-bold focus:border-orange-500 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-400 font-mono mb-1">FTP (W)</label>
-                <input
-                  type="number"
-                  value={profile.ftp}
-                  onChange={(e) => handleProfileFieldChange('ftp', Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono font-bold focus:border-orange-500 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-400 font-mono mb-1">CSS natation (/100m)</label>
-                <input
-                  type="text"
-                  value={profile.nat100}
-                  onChange={(e) => handleProfileFieldChange('nat100', e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono font-bold focus:border-orange-500 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-400 font-mono mb-1">Poids (kg)</label>
-                <input
-                  type="number"
-                  value={profile.weight}
-                  onChange={(e) => handleProfileFieldChange('weight', Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono font-bold focus:border-orange-500 focus:outline-none"
-                />
-              </div>
-              <div className="col-span-2">
-                <label className="block text-slate-400 font-mono mb-1">FC Max (bpm)</label>
-                <input
-                  type="number"
-                  value={profile.fcMax}
-                  onChange={(e) => handleProfileFieldChange('fcMax', Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono font-bold focus:border-orange-500 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            {profile.ftp && profile.weight ? (
-              <div className="bg-indigo-950/40 border border-indigo-500/30 p-3 rounded-xl text-[11px] text-indigo-300">
-                ⚡ Rapport Poids/Puissance : <strong>{(profile.ftp / profile.weight).toFixed(2)} W/kg</strong>
-              </div>
-            ) : null}
-          </div>
+          <ProfileHealth profile={profile} onProfileChange={setProfile} sportType={sportType} />
         )}
 
         {/* ONGLET CHAT */}
