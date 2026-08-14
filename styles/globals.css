@@ -33,3 +33,24 @@ body {
 .animate-fadeIn {
   animation: fadeIn 0.2s ease-out;
 }
+/* Utilitaires Scrollbar pour mobile */
+@layer utilities {
+  /* Masquer la scrollbar sur Chrome, Safari et Opera */
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  /* Masquer la scrollbar sur IE, Edge et Firefox */
+  .scrollbar-none {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out forwards;
+}
