@@ -21,20 +21,86 @@ export function badgeClass(type) {
   }
 }
 
-export default function CalendarView({ 
-  weekKey = 'N', 
+export default function CalendarView({
+  weekKey = 'N',
   workouts = [], // Reçoit le tableau des séances de la semaine active (ex: workouts[activeWeek])
   daysOfWeek = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'],
-  onSelectWorkout 
+  onSelectWorkout,
 }) {
-  // Sécurisation au cas où workouts soit sous forme d'objet ou undefined
-  const workoutList = Array.isArray(workouts) 
-    ? workouts 
-    : (workouts?.[weekKey] || []);
+  const workoutList = Array.isArray(workouts) ? workouts : (workouts?.[weekKey] || []);
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-4 space-y-3">
-      {/* En-tête */}
+      <div className="flex justify-between items-center">
+        <h3 className="text-xs font-black uppercase tracking-wide text-slate-300">
+          Semaine{' '}
+          <span className="text-orange-400">{weekKey === 'N' ? 'En cours (N)' : 'Suivante (N+1)'}</span>
+        </h3>
+        <span className="text-[10px] font-mono font-bold bg-slate-950 px-2.5 py-1 rounded-full border border-slate-800 text-slate-400">
+          {workoutList.length} séances
+        </span>
+      </div>
+
+      <div className="grid grid-flow-col auto-cols-[minmax(125px,1fr)] sm:grid-flow-row sm:grid-cols-7 gap-2 overflow-x-auto pb-2 snap-x snap-mandatory sm:overflow-visible scrollbar-none">
+        {daysOfWeek.map((dayName) => {
+          const workout = workoutList.find((w) => w.day?.toLowerCase() === dayName.toLowerCase());
+          const isRest = !workout || workout.type === 'REPOS';
+
+          return (
+            <button
+              key={dayName}
+              type="button"
+              disabled={!workout}
+              onClick={() => workout && onSelectWorkout?.(workout)}
+              className={`snap-start text-left bg-slate-950 border rounded-xl p-2.5 flex flex-col justify-between min-h-[130px] transition-all ${
+                workout
+                  ? 'border-slate-800 hover:border-orange-500/50 active:scale-[0.98] cursor-pointer'
+                  : 'border-slate-900/60 opacity-50 cursor-default'
+              }`}
+            >
+              <div>
+                <div className="flex justify-between items-start gap-1 mb-1.5">
+                  <span className="text-[10px] font-bold uppercase text-slate-500">{dayName.slice(0, 3)}</span>
+                  {workout && (
+                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border shrink-0 uppercase font-mono ${badgeClass(workout.type)}`}>
+                      {workout.type === 'C.A.P' ? 'CAP' : workout.type?.slice(0, 4)}
+                    </span>
+                  )}
+                </div>
+
+                {workout ? (
+                  <div>
+                    <p className="text-[11px] font-bold text-white line-clamp-2 leading-tight">{workout.title}</p>
+                    {!isRest && workout.intensity && (
+                      <p className="text-[10px] text-orange-400 font-mono mt-1 truncate">{workout.intensity}</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[11px] italic text-slate-600 mt-2">Repos</p>
+                )}
+              </div>
+
+              {workout && (
+                <div className="mt-2 pt-1.5 border-t border-slate-900 flex justify-between items-center text-[9px] font-mono text-slate-400">
+                  <span>{workout.duration}</span>
+                  {workout.modified && (
+                    <span className="text-orange-400 font-bold" title="Séance modifiée via chat">
+                      ● mod
+                    </span>
+                  )}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <p className="text-[10px] text-slate-500 text-center sm:hidden">
+        ← Glisse latéralement pour voir toute la semaine →
+      </p>
+    </div>
+  );
+}      {/* En-tête */}
       <div className="flex justify-between items-center">
         <h3 className="text-xs font-black uppercase tracking-wide text-slate-300">
           Semaine{' '}
