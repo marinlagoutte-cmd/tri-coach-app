@@ -28,6 +28,7 @@ const TRIATHLON_FORMAT_DISTANCES = {
 export default function WizardModal({ isOpen, onClose, onComplete, submitting = false, submitError = null }) {
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
+    firstName: '',
     eventName: '',
     gender: 'homme',
     weight: '',
@@ -155,9 +156,18 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
     });
   };
 
+  // Une incohérence "dure" (durée moyenne par séance totalement irréaliste)
+  // doit bloquer la génération, pas juste afficher un avertissement ignorable.
+  const hasBlockingWarning = useMemo(() => {
+    const hours = Number(formData.hoursPerWeek) || 0;
+    const sessions = Number(formData.maxSessionsPerWeek) || 1;
+    const avgMinutes = (hours * 60) / sessions;
+    return avgMinutes < 20 || avgMinutes > 240;
+  }, [formData.hoursPerWeek, formData.maxSessionsPerWeek]);
+
   const stepIsValid = () => {
-    if (step === 1) return Boolean(formData.weight) && Number(formData.weight) > 0;
-    if (step === 4) return Boolean(formData.targetDate) && Number(formData.hoursPerWeek) > 0 && Number(formData.maxSessionsPerWeek) > 0;
+    if (step === 1) return Boolean(formData.firstName?.trim()) && Boolean(formData.weight) && Number(formData.weight) > 0;
+    if (step === 4) return Boolean(formData.targetDate) && Number(formData.hoursPerWeek) > 0 && Number(formData.maxSessionsPerWeek) > 0 && !hasBlockingWarning;
     return true;
   };
 
@@ -194,6 +204,17 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
           {step === 1 && (
             <div className="space-y-4">
               <h3 className="text-xs font-black uppercase tracking-wide text-orange-400">1. Profil & discipline</h3>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Prénom</label>
+                <input
+                  type="text"
+                  value={formData.firstName}
+                  onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                  placeholder="Ex: Marin"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white placeholder-slate-600"
+                />
+              </div>
 
               <div>
                 <label className="text-xs text-slate-400 block mb-1">Nom de l'objectif (optionnel)</label>
@@ -536,6 +557,9 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
                   {coherenceWarnings.map((w, i) => (
                     <p key={i} className="leading-relaxed">{w}</p>
                   ))}
+                  {hasBlockingWarning && (
+                    <p className="leading-relaxed font-bold">Ajuste le volume horaire ou le nombre de séances pour continuer — cette combinaison n'est pas réalisable.</p>
+                  )}
                 </div>
               )}
 
