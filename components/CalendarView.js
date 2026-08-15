@@ -38,11 +38,14 @@ function SessionPill({ workout, compact, onSelectWorkout }) {
           <span className="text-orange-400 font-bold text-[9px] shrink-0" title="Séance modifiée via chat">●</span>
         )}
       </div>
-      <p className={`text-xs font-bold text-white leading-snug break-words hyphens-auto ${compact ? 'line-clamp-2' : 'line-clamp-3'}`}>
+      <p className={`text-xs font-bold text-white leading-snug break-words hyphens-auto ${compact ? 'line-clamp-2' : 'line-clamp-2'}`}>
         {workout.title}
       </p>
-      {!isRest && workout.intensity && !compact && (
+      {!isRest && workout.intensity && (
         <p className="text-[10px] text-orange-400 font-mono mt-1 leading-snug break-words">{workout.intensity}</p>
+      )}
+      {!isRest && workout.structure && !compact && (
+        <p className="text-[9px] text-slate-400 mt-1 leading-snug break-words line-clamp-2">{workout.structure}</p>
       )}
       {!isRest && (
         <p className="text-[9px] font-mono text-slate-400 mt-1 truncate">{workout.duration}</p>
@@ -81,7 +84,7 @@ export default function CalendarView({
           return (
             <div
               key={dayName}
-              className={`snap-start bg-slate-950 border rounded-xl p-2.5 flex flex-col gap-1.5 min-h-[150px] overflow-hidden ${
+              className={`snap-start bg-slate-950 border rounded-xl p-2.5 flex flex-col gap-1.5 min-h-[172px] overflow-hidden ${
                 hasSessions ? 'border-slate-800' : 'border-slate-900/60 opacity-50'
               }`}
             >
