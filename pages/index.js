@@ -117,11 +117,11 @@ export default function Home() {
     if (!sportFilters.find((f) => f.id === sportFilter)) setSportFilter(sportFilters[0]?.id || 'ALL');
   }, [sportFilters]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filteredWorkouts = useMemo(() => {
-    const list = workouts[activeWeek] || [];
-    if (sportFilter === 'ALL') return list;
-    return list.filter((w) => shortLabel(w.type) === sportFilter || w.type === 'REPOS');
-  }, [workouts, activeWeek, sportFilter]);
+  // On ne filtre plus la liste ici : CalendarView a besoin de connaître TOUTES les
+  // séances de la semaine (pas seulement celles du sport choisi) pour pouvoir
+  // distinguer un vrai jour de repos d'un jour où une autre discipline est prévue.
+  // Le filtrage par sport est donc appliqué à l'intérieur de CalendarView via `sportFilter`.
+  const weekWorkouts = useMemo(() => workouts[activeWeek] || [], [workouts, activeWeek]);
 
   // --- GÉNÉRATION D'UN NOUVEAU PLAN VIA L'ASSISTANT ---
   const handleWizardComplete = async (wizardData) => {
@@ -353,7 +353,8 @@ export default function Home() {
 
             <CalendarView
               weekKey={activeWeek}
-              workouts={filteredWorkouts}
+              workouts={weekWorkouts}
+              sportFilter={sportFilter}
               onSelectWorkout={setSelectedWorkout}
               validatedIds={new Set(feedbackHistory.map((f) => f.workoutId))}
             />
