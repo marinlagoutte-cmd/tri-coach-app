@@ -7,6 +7,12 @@ function FieldsGrid({ workout, title, dimmed }) {
     <div className={dimmed ? 'opacity-60' : ''}>
       {title && <p className="text-[10px] font-bold uppercase text-slate-500 mb-1.5">{title}</p>}
       <p className="text-xs font-bold text-white mb-1.5">{workout.title} · <span className="font-mono text-slate-400">{workout.duration}</span></p>
+      {workout.structure && (
+        <div className="bg-orange-500/5 border border-orange-500/20 p-2.5 rounded-lg mb-2">
+          <span className="text-[9px] text-orange-400 uppercase font-bold block mb-0.5">Structure de la séance</span>
+          <p className="text-[11px] text-slate-200 leading-relaxed">{workout.structure}</p>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
         {fields.map((f) => (
           <div key={f.label} className="bg-slate-950 border border-slate-800 p-2.5 rounded-xl">
