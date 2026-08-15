@@ -64,6 +64,7 @@ export default function Home() {
   const [selectedWorkout, setSelectedWorkout] = useState(null);
   const [feedbackHistory, setFeedbackHistory] = useState([]);
   const [pendingAdjustment, setPendingAdjustment] = useState(null);
+  const [onboarded, setOnboarded] = useState(true); // true par défaut le temps de l'hydratation, pour ne pas flasher le wizard inutilement
 
   const [messages, setMessages] = useState([{ sender: 'coach', text: WELCOME_MESSAGE_TEXT('') }]);
   const [inputMessage, setInputMessage] = useState('');
@@ -82,6 +83,10 @@ export default function Home() {
     setMessages(loadFromStorage(STORAGE_KEYS.chat, [{ sender: 'coach', text: WELCOME_MESSAGE_TEXT(loadedProfile.firstName) }]));
     setSportType(loadFromStorage(STORAGE_KEYS.sportType, 'triathlon'));
     setFeedbackHistory(loadFromStorage(STORAGE_KEYS.feedbackHistory, []));
+    const alreadyOnboarded = loadFromStorage(STORAGE_KEYS.onboarded, false);
+    setOnboarded(alreadyOnboarded);
+    // Aucun plan encore généré : on propose directement le formulaire au lieu d'attendre un clic.
+    if (!alreadyOnboarded) setShowWizard(true);
     setHydrated(true);
   }, []);
 
@@ -92,6 +97,7 @@ export default function Home() {
   useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.chat, messages); }, [messages, hydrated]);
   useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.sportType, sportType); }, [sportType, hydrated]);
   useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.feedbackHistory, feedbackHistory); }, [feedbackHistory, hydrated]);
+  useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.onboarded, onboarded); }, [onboarded, hydrated]);
 
   useEffect(() => {
     if (activeTab === 'chat') {
@@ -135,6 +141,7 @@ export default function Home() {
       }
       setShowWizard(false);
       setActiveTab('calendar');
+      setOnboarded(true);
 
       const coachMsg = `🎯 **Nouveau plan généré !**\n\n- **Objectif** : ${data.trainingPlan?.title || wizardData.eventName || 'Nouvel objectif'}\n- **Volume hebdo** : ~${wizardData.hoursPerWeek}h/semaine sur ${wizardData.maxSessionsPerWeek} séances\n\nLes semaines N et N+1 ont été calées sur tes métriques actuelles.`;
       setMessages((prev) => [...prev, { sender: 'coach', text: coachMsg }]);
