@@ -57,7 +57,9 @@ export default function Home() {
   const [workouts, setWorkouts] = useState(DEFAULT_WORKOUTS);
   const [sportType, setSportType] = useState('triathlon');
 
-  const [showWizard, setShowWizard] = useState(false);
+  // Ouvert par défaut : évite tout délai/flash au premier chargement (voir effet d'hydratation
+  // ci-dessous qui le referme immédiatement si l'athlète a déjà un plan).
+  const [showWizard, setShowWizard] = useState(true);
   const [wizardSubmitting, setWizardSubmitting] = useState(false);
   const [wizardError, setWizardError] = useState(null);
 
@@ -83,10 +85,11 @@ export default function Home() {
     setMessages(loadFromStorage(STORAGE_KEYS.chat, [{ sender: 'coach', text: WELCOME_MESSAGE_TEXT(loadedProfile.firstName) }]));
     setSportType(loadFromStorage(STORAGE_KEYS.sportType, 'triathlon'));
     setFeedbackHistory(loadFromStorage(STORAGE_KEYS.feedbackHistory, []));
-    const alreadyOnboarded = loadFromStorage(STORAGE_KEYS.onboarded, false);
+    const alreadyOnboarded = loadFromStorage(STORAGE_KEYS.onboarded, false) || Boolean(loadedProfile.firstName?.trim());
     setOnboarded(alreadyOnboarded);
-    // Aucun plan encore généré : on propose directement le formulaire au lieu d'attendre un clic.
-    if (!alreadyOnboarded) setShowWizard(true);
+    // Décision explicite dans les deux sens (ouvrir OU fermer), pour ne jamais dépendre
+    // d'un état initial supposé et garantir un affichage cohérent dès l'hydratation.
+    setShowWizard(!alreadyOnboarded);
     setHydrated(true);
   }, []);
 
