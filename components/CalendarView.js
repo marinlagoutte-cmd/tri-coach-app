@@ -61,6 +61,9 @@ export default function CalendarView({
   onSelectWorkout,
 }) {
   const workoutList = Array.isArray(workouts) ? workouts : (workouts?.[weekKey] || []);
+  // Le compteur affiché doit correspondre aux séances d'entraînement réelles,
+  // pas au nombre total d'entrées (qui inclut les jours de repos).
+  const realSessionCount = workoutList.filter((w) => w.type !== 'REPOS').length;
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-4 space-y-3">
@@ -70,7 +73,7 @@ export default function CalendarView({
           <span className="text-orange-400">{weekKey === 'N' ? 'En cours (N)' : 'Suivante (N+1)'}</span>
         </h3>
         <span className="text-[10px] font-mono font-bold bg-slate-950 px-2.5 py-1 rounded-full border border-slate-800 text-slate-400">
-          {workoutList.length} séances
+          {realSessionCount} séances
         </span>
       </div>
 
