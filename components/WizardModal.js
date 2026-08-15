@@ -69,6 +69,16 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
     return base;
   }, [formData, hoursSessionsWarning]);
 
+  const runningDistanceKm = useMemo(() => {
+    if (formData.runningSubtype === 'trail') return Number(formData.trailKm) || 0;
+    const map = { '5km': 5, '10km': 10, 'Semi-marathon': 21.0975, Marathon: 42.195 };
+    return map[formData.distance] || 0;
+  }, [formData.runningSubtype, formData.distance, formData.trailKm]);
+
+  const runningTotalMinutes = useMemo(() => {
+    return formData.runningPace * runningDistanceKm;
+  }, [formData.runningPace, runningDistanceKm]);
+
   if (!isOpen) return null;
 
   const getAverageTimeIndicator = () => {
@@ -131,16 +141,6 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
     if (key === 'run') return `${formatPace(timeMin / distanceKm)} /km`;
     return '—';
   };
-
-  const runningDistanceKm = useMemo(() => {
-    if (formData.runningSubtype === 'trail') return Number(formData.trailKm) || 0;
-    const map = { '5km': 5, '10km': 10, 'Semi-marathon': 21.0975, Marathon: 42.195 };
-    return map[formData.distance] || 0;
-  }, [formData.runningSubtype, formData.distance, formData.trailKm]);
-
-  const runningTotalMinutes = useMemo(() => {
-    return formData.runningPace * runningDistanceKm;
-  }, [formData.runningPace, runningDistanceKm]);
 
   const onRunningTotalChange = (valMinutes) => {
     const pace = runningDistanceKm > 0 ? valMinutes / runningDistanceKm : formData.runningPace;
