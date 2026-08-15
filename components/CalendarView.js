@@ -18,14 +18,16 @@ export function badgeClass(type) {
   }
 }
 
-function SessionPill({ workout, compact, onSelectWorkout }) {
+function SessionPill({ workout, compact, onSelectWorkout, isValidated }) {
   const isRest = workout.type === 'REPOS';
   return (
     <button
       type="button"
       onClick={() => onSelectWorkout?.(workout)}
       className={`w-full text-left rounded-lg p-2 transition-all border ${
-        isRest
+        isValidated
+          ? 'border-emerald-600/70 bg-emerald-950/30 hover:border-emerald-500 active:scale-[0.98]'
+          : isRest
           ? 'border-slate-900/60 opacity-60'
           : 'border-slate-800 hover:border-orange-500/50 active:scale-[0.98]'
       }`}
@@ -34,9 +36,14 @@ function SessionPill({ workout, compact, onSelectWorkout }) {
         <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 uppercase font-mono leading-none ${badgeClass(workout.type)}`}>
           {shortLabel(workout.type)}
         </span>
-        {workout.modified && (
-          <span className="text-orange-400 font-bold text-[9px] shrink-0" title="Séance modifiée via chat">●</span>
-        )}
+        <span className="flex items-center gap-1 shrink-0">
+          {isValidated && (
+            <span className="text-emerald-400 font-bold text-[10px]" title="Séance validée">✓</span>
+          )}
+          {workout.modified && (
+            <span className="text-orange-400 font-bold text-[9px]" title="Séance modifiée via chat">●</span>
+          )}
+        </span>
       </div>
       <p className={`text-xs font-bold text-white leading-snug break-words hyphens-auto ${compact ? 'line-clamp-2' : 'line-clamp-2'}`}>
         {workout.title}
@@ -59,6 +66,7 @@ export default function CalendarView({
   workouts = [],
   daysOfWeek = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'],
   onSelectWorkout,
+  validatedIds = new Set(),
 }) {
   const workoutList = Array.isArray(workouts) ? workouts : (workouts?.[weekKey] || []);
   // Le compteur affiché doit correspondre aux séances d'entraînement réelles,
@@ -95,7 +103,7 @@ export default function CalendarView({
 
               {hasSessions ? (
                 sessions.map((w) => (
-                  <SessionPill key={w.id} workout={w} compact={sessions.length > 1} onSelectWorkout={onSelectWorkout} />
+                  <SessionPill key={w.id} workout={w} compact={sessions.length > 1} onSelectWorkout={onSelectWorkout} isValidated={validatedIds.has(w.id)} />
                 ))
               ) : (
                 <p className="text-[11px] italic text-slate-600 mt-1">Repos</p>
