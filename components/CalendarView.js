@@ -67,11 +67,20 @@ export default function CalendarView({
   daysOfWeek = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'],
   onSelectWorkout,
   validatedIds = new Set(),
+  sportFilter = 'ALL',
 }) {
   const workoutList = Array.isArray(workouts) ? workouts : (workouts?.[weekKey] || []);
-  // Le compteur affiché doit correspondre aux séances d'entraînement réelles,
-  // pas au nombre total d'entrées (qui inclut les jours de repos).
-  const realSessionCount = workoutList.filter((w) => w.type !== 'REPOS').length;
+
+  // Le filtrage par sport se fait ICI (au niveau de l'affichage jour par jour),
+  // et non plus en amont sur la liste brute : sinon, un jour dont la séance ne
+  // correspond pas au sport choisi se retrouve avec 0 séance et s'affiche comme
+  // "Repos", ce qui laisse croire à tort que c'est un vrai jour de repos.
+  const matchesFilter = (w) => sportFilter === 'ALL' || shortLabel(w.type) === sportFilter || w.type === 'REPOS';
+
+  // Le compteur affiché doit correspondre aux séances d'entraînement réelles
+  // du sport sélectionné, pas au nombre total d'entrées (qui inclut les jours
+  // de repos et les autres disciplines).
+  const realSessionCount = workoutList.filter((w) => w.type !== 'REPOS' && matchesFilter(w)).length;
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-4 space-y-3">
@@ -89,8 +98,12 @@ export default function CalendarView({
           sur tous les écrans, une grille fixe à 7 colonnes y écraserait le texte. */}
       <div className="grid grid-flow-col auto-cols-[minmax(148px,1fr)] gap-2.5 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none">
         {daysOfWeek.map((dayName) => {
-          const sessions = workoutList.filter((w) => w.day?.toLowerCase() === dayName.toLowerCase());
+          const allDaySessions = workoutList.filter((w) => w.day?.toLowerCase() === dayName.toLowerCase());
+          const sessions = allDaySessions.filter(matchesFilter);
           const hasSessions = sessions.length > 0 && !(sessions.length === 1 && sessions[0].type === 'REPOS');
+          // Ce jour n'est pas un vrai jour de repos : il a une séance, mais d'une
+          // autre discipline que celle actuellement filtrée.
+          const hasOtherSportOnly = !hasSessions && allDaySessions.some((w) => w.type !== 'REPOS' && !matchesFilter(w));
 
           return (
             <div
@@ -105,6 +118,8 @@ export default function CalendarView({
                 sessions.map((w) => (
                   <SessionPill key={w.id} workout={w} compact={sessions.length > 1} onSelectWorkout={onSelectWorkout} isValidated={validatedIds.has(w.id)} />
                 ))
+              ) : hasOtherSportOnly ? (
+                <p className="text-[11px] italic text-slate-600 mt-1">Autre séance</p>
               ) : (
                 <p className="text-[11px] italic text-slate-600 mt-1">Repos</p>
               )}
