@@ -1,18 +1,16 @@
 import React from 'react';
+import { shortLabel } from '../lib/workouts';
+
+export { shortLabel };
 
 export function badgeClass(type) {
-  switch (type?.toUpperCase()) {
-    case 'NATATION':
+  switch (shortLabel(type)) {
     case 'SWIM':
       return 'bg-cyan-950 text-cyan-400 border-cyan-800';
-    case 'CYCLISME':
-    case 'VELO':
     case 'BIKE':
       return 'bg-amber-950 text-amber-400 border-amber-800';
-    case 'C.A.P':
     case 'RUN':
       return 'bg-emerald-950 text-emerald-400 border-emerald-800';
-    case 'ENCHAÎNEMENT':
     case 'BRICK':
       return 'bg-purple-950 text-purple-400 border-purple-800';
     default:
@@ -20,26 +18,37 @@ export function badgeClass(type) {
   }
 }
 
-export function shortLabel(type) {
-  switch (type?.toUpperCase()) {
-    case 'NATATION':
-    case 'SWIM':
-      return 'SWIM';
-    case 'CYCLISME':
-    case 'VELO':
-    case 'BIKE':
-      return 'BIKE';
-    case 'C.A.P':
-    case 'RUN':
-      return 'RUN';
-    case 'ENCHAÎNEMENT':
-    case 'BRICK':
-      return 'BRICK';
-    case 'REPOS':
-      return 'REPOS';
-    default:
-      return type?.slice(0, 5) || '-';
-  }
+function SessionPill({ workout, compact, onSelectWorkout }) {
+  const isRest = workout.type === 'REPOS';
+  return (
+    <button
+      type="button"
+      onClick={() => onSelectWorkout?.(workout)}
+      className={`w-full text-left rounded-lg p-2 transition-all border ${
+        isRest
+          ? 'border-slate-900/60 opacity-60'
+          : 'border-slate-800 hover:border-orange-500/50 active:scale-[0.98]'
+      }`}
+    >
+      <div className="flex justify-between items-center gap-1 mb-1">
+        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 uppercase font-mono leading-none ${badgeClass(workout.type)}`}>
+          {shortLabel(workout.type)}
+        </span>
+        {workout.modified && (
+          <span className="text-orange-400 font-bold text-[9px] shrink-0" title="Séance modifiée via chat">●</span>
+        )}
+      </div>
+      <p className={`text-xs font-bold text-white leading-snug break-words hyphens-auto ${compact ? 'line-clamp-2' : 'line-clamp-3'}`}>
+        {workout.title}
+      </p>
+      {!isRest && workout.intensity && !compact && (
+        <p className="text-[10px] text-orange-400 font-mono mt-1 leading-snug break-words">{workout.intensity}</p>
+      )}
+      {!isRest && (
+        <p className="text-[9px] font-mono text-slate-400 mt-1 truncate">{workout.duration}</p>
+      )}
+    </button>
+  );
 }
 
 export default function CalendarView({
@@ -62,61 +71,35 @@ export default function CalendarView({
         </span>
       </div>
 
-      <div className="grid grid-flow-col auto-cols-[minmax(168px,1fr)] sm:grid-flow-row sm:grid-cols-7 gap-3 overflow-x-auto pb-2 snap-x snap-mandatory sm:overflow-visible scrollbar-none">
+      {/* Toujours en scroll horizontal : le conteneur app reste étroit (max-w-md)
+          sur tous les écrans, une grille fixe à 7 colonnes y écraserait le texte. */}
+      <div className="grid grid-flow-col auto-cols-[minmax(148px,1fr)] gap-2.5 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none">
         {daysOfWeek.map((dayName) => {
-          const workout = workoutList.find((w) => w.day?.toLowerCase() === dayName.toLowerCase());
-          const isRest = !workout || workout.type === 'REPOS';
+          const sessions = workoutList.filter((w) => w.day?.toLowerCase() === dayName.toLowerCase());
+          const hasSessions = sessions.length > 0 && !(sessions.length === 1 && sessions[0].type === 'REPOS');
 
           return (
-            <button
+            <div
               key={dayName}
-              type="button"
-              disabled={!workout}
-              onClick={() => workout && onSelectWorkout?.(workout)}
-              className={`snap-start text-left bg-slate-950 border rounded-xl p-3 flex flex-col justify-between min-h-[150px] overflow-hidden transition-all ${
-                workout
-                  ? 'border-slate-800 hover:border-orange-500/50 active:scale-[0.98] cursor-pointer'
-                  : 'border-slate-900/60 opacity-50 cursor-default'
+              className={`snap-start bg-slate-950 border rounded-xl p-2.5 flex flex-col gap-1.5 min-h-[150px] overflow-hidden ${
+                hasSessions ? 'border-slate-800' : 'border-slate-900/60 opacity-50'
               }`}
             >
-              <div className="min-w-0">
-                <div className="flex justify-between items-center gap-1.5 mb-2">
-                  <span className="text-[10px] font-bold uppercase text-slate-500 shrink-0">{dayName.slice(0, 3)}</span>
-                  {workout && (
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 whitespace-nowrap uppercase font-mono leading-none ${badgeClass(workout.type)}`}>
-                      {shortLabel(workout.type)}
-                    </span>
-                  )}
-                </div>
+              <span className="text-[10px] font-bold uppercase text-slate-500 shrink-0">{dayName.slice(0, 3)}</span>
 
-                {workout ? (
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-white leading-snug line-clamp-2 break-words">{workout.title}</p>
-                    {!isRest && workout.intensity && (
-                      <p className="text-[10px] text-orange-400 font-mono mt-1.5 leading-snug line-clamp-1 break-words">{workout.intensity}</p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-[11px] italic text-slate-600 mt-2">Repos</p>
-                )}
-              </div>
-
-              {workout && (
-                <div className="mt-2 pt-1.5 border-t border-slate-900 flex justify-between items-center gap-1.5 text-[9px] font-mono text-slate-400">
-                  <span className="truncate">{workout.duration}</span>
-                  {workout.modified && (
-                    <span className="text-orange-400 font-bold shrink-0" title="Séance modifiée via chat">
-                      ● mod
-                    </span>
-                  )}
-                </div>
+              {hasSessions ? (
+                sessions.map((w) => (
+                  <SessionPill key={w.id} workout={w} compact={sessions.length > 1} onSelectWorkout={onSelectWorkout} />
+                ))
+              ) : (
+                <p className="text-[11px] italic text-slate-600 mt-1">Repos</p>
               )}
-            </button>
+            </div>
           );
         })}
       </div>
 
-      <p className="text-[10px] text-slate-500 text-center sm:hidden">
+      <p className="text-[10px] text-slate-500 text-center">
         ← Glisse latéralement pour voir toute la semaine →
       </p>
     </div>
