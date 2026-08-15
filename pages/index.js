@@ -9,6 +9,7 @@ import WeatherPanel from '../components/WeatherPanel';
 import { STORAGE_KEYS, loadFromStorage, saveToStorage } from '../lib/storage';
 import { DEFAULT_PROFILE, DEFAULT_TRAINING_PLAN, DEFAULT_WORKOUTS } from '../lib/defaults';
 import { computeRaceStats, shortLabel } from '../lib/workouts';
+import { analyzeFeedback } from '../lib/feedback';
 
 const TABS = [
   { id: 'nutrition', label: 'Nutrition', icon: '🥗' },
@@ -61,6 +62,8 @@ export default function Home() {
   const [wizardError, setWizardError] = useState(null);
 
   const [selectedWorkout, setSelectedWorkout] = useState(null);
+  const [feedbackHistory, setFeedbackHistory] = useState([]);
+  const [pendingAdjustment, setPendingAdjustment] = useState(null);
 
   const [messages, setMessages] = useState([{ sender: 'coach', text: WELCOME_MESSAGE_TEXT('') }]);
   const [inputMessage, setInputMessage] = useState('');
@@ -78,6 +81,7 @@ export default function Home() {
     setWorkouts(loadFromStorage(STORAGE_KEYS.workouts, DEFAULT_WORKOUTS));
     setMessages(loadFromStorage(STORAGE_KEYS.chat, [{ sender: 'coach', text: WELCOME_MESSAGE_TEXT(loadedProfile.firstName) }]));
     setSportType(loadFromStorage(STORAGE_KEYS.sportType, 'triathlon'));
+    setFeedbackHistory(loadFromStorage(STORAGE_KEYS.feedbackHistory, []));
     setHydrated(true);
   }, []);
 
@@ -87,6 +91,7 @@ export default function Home() {
   useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.workouts, workouts); }, [workouts, hydrated]);
   useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.chat, messages); }, [messages, hydrated]);
   useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.sportType, sportType); }, [sportType, hydrated]);
+  useEffect(() => { if (hydrated) saveToStorage(STORAGE_KEYS.feedbackHistory, feedbackHistory); }, [feedbackHistory, hydrated]);
 
   useEffect(() => {
     if (activeTab === 'chat') {
@@ -147,23 +152,18 @@ export default function Home() {
     }
   };
 
-  // --- CHAT AVEC LE COACH IA ---
-  const handleSendMessage = async (e) => {
-    e?.preventDefault();
-    if (!inputMessage.trim() || chatLoading) return;
-
-    const userText = inputMessage;
-    const intentPrefix = chatIntent === 'add' ? '[Ajout d\'une séance supplémentaire] ' : chatIntent === 'modify' ? '[Modification de séance] ' : '';
-    const newHistory = [...messages, { sender: 'user', text: intentPrefix + userText }];
+  // --- CHAT AVEC LE COACH IA (fonction partagée : saisie libre + actions automatiques comme "alléger la semaine") ---
+  const sendCoachMessage = async (userText, { intent = null, displayText = null } = {}) => {
+    if (chatLoading) return;
+    const newHistory = [...messages, { sender: 'user', text: displayText || userText }];
     setMessages(newHistory);
-    setInputMessage('');
     setChatLoading(true);
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userText, profile, workouts, trainingPlan, intent: chatIntent }),
+        body: JSON.stringify({ message: userText, profile, workouts, trainingPlan, intent }),
       });
       const data = await res.json();
 
@@ -189,7 +189,6 @@ export default function Home() {
 
       nextMessages.push({ sender: 'coach', text: data.reply || "J'ai bien pris en compte ta demande." });
       setMessages(nextMessages);
-      setChatIntent(null);
     } catch (err) {
       setMessages([
         ...newHistory,
@@ -199,6 +198,45 @@ export default function Home() {
       setChatLoading(false);
     }
   };
+
+  const handleSendMessage = async (e) => {
+    e?.preventDefault();
+    if (!inputMessage.trim() || chatLoading) return;
+    const intentPrefix = chatIntent === 'add' ? '[Ajout d\'une séance supplémentaire] ' : chatIntent === 'modify' ? '[Modification de séance] ' : '';
+    const userText = inputMessage;
+    setInputMessage('');
+    await sendCoachMessage(userText, { intent: chatIntent, displayText: intentPrefix + userText });
+    setChatIntent(null);
+  };
+
+  // --- VALIDATION D'UNE SÉANCE : ressenti dureté + forme physique ---
+  const handleSubmitFeedback = (workout, difficulty, capacity) => {
+    const analysis = analyzeFeedback(workout, { difficulty, capacity }, feedbackHistory);
+    const entry = {
+      workoutId: workout.id,
+      day: workout.day,
+      difficulty,
+      capacity,
+      expectedDifficulty: analysis.expectedDifficulty,
+      timestamp: Date.now(),
+    };
+    setFeedbackHistory((prev) => [...prev, entry]);
+    if (analysis.needsCheck) {
+      setPendingAdjustment({ workout, analysis });
+    }
+  };
+
+  const handleLightenWeek = () => {
+    const w = pendingAdjustment?.workout;
+    setPendingAdjustment(null);
+    if (!w) return;
+    sendCoachMessage(
+      `La séance "${w.title}" du ${w.day} a été ressentie bien plus dure que prévu, avec une forme physique faible ce jour-là. Allège les séances restantes de cette semaine pour laisser récupérer l'athlète.`,
+      { intent: 'modify', displayText: `📉 Allègement demandé suite au ressenti de la séance du ${w.day}.` }
+    );
+  };
+
+  const handleKeepAsIs = () => setPendingAdjustment(null);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-body flex flex-col pb-20 md:pb-6 antialiased">
@@ -430,7 +468,15 @@ export default function Home() {
         submitError={wizardError}
       />
 
-      <WorkoutDetail workout={selectedWorkout} onClose={() => setSelectedWorkout(null)} />
+      <WorkoutDetail
+        workout={selectedWorkout}
+        onClose={() => setSelectedWorkout(null)}
+        existingFeedback={selectedWorkout ? [...feedbackHistory].reverse().find((f) => f.workoutId === selectedWorkout.id) : null}
+        pendingAdjustment={pendingAdjustment}
+        onSubmitFeedback={handleSubmitFeedback}
+        onLightenWeek={handleLightenWeek}
+        onKeepAsIs={handleKeepAsIs}
+      />
 
     </div>
   );
