@@ -4,13 +4,17 @@ import ChatMessage from '../components/ChatMessage';
 import WorkoutDetail from '../components/WorkoutDetail';
 import WizardModal from '../components/WizardModal';
 import ProfileHealth from '../components/ProfileHealth';
+import NutritionPanel from '../components/NutritionPanel';
+import WeatherPanel from '../components/WeatherPanel';
 import { STORAGE_KEYS, loadFromStorage, saveToStorage } from '../lib/storage';
 import { DEFAULT_PROFILE, DEFAULT_TRAINING_PLAN, DEFAULT_WORKOUTS } from '../lib/defaults';
 import { computeRaceStats, shortLabel } from '../lib/workouts';
 
 const TABS = [
+  { id: 'nutrition', label: 'Nutrition', icon: '🥗' },
   { id: 'calendar', label: 'Calendrier', icon: '📅' },
   { id: 'objective', label: 'Objectif', icon: '🎯' },
+  { id: 'weather', label: 'Météo', icon: '🌦️' },
   { id: 'profile', label: 'Profil', icon: '⚙️' },
   { id: 'chat', label: 'Coach Chat', icon: '💬' },
 ];
@@ -217,14 +221,14 @@ export default function Home() {
 
       {/* ONGLETS */}
       <nav className="bg-slate-900 border-b border-slate-800 sticky top-[53px] z-20 px-2 py-2">
-        <div className="max-w-md mx-auto grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800/80">
+        <div className="max-w-md mx-auto flex gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800/80 overflow-x-auto scrollbar-none">
           {TABS.map((tab) => {
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[11px] font-bold transition-all ${
+                className={`flex flex-col items-center justify-center py-2 px-2.5 rounded-xl text-[11px] font-bold transition-all shrink-0 min-w-[64px] ${
                   isActive
                     ? 'bg-slate-800 text-orange-400 border border-slate-700 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'
@@ -239,6 +243,14 @@ export default function Home() {
       </nav>
 
       <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4">
+
+        {/* ONGLET NUTRITION */}
+        {activeTab === 'nutrition' && (
+          <NutritionPanel profile={profile} trainingPlan={trainingPlan} workouts={workouts} sportType={sportType} />
+        )}
+
+        {/* ONGLET MÉTÉO */}
+        {activeTab === 'weather' && <WeatherPanel />}
 
         {/* ONGLET CALENDRIER */}
         {activeTab === 'calendar' && (
