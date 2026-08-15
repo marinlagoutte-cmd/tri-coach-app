@@ -221,6 +221,8 @@ export default function Home() {
 
   // --- VALIDATION D'UNE SÉANCE : ressenti dureté + forme physique ---
   const handleSubmitFeedback = (workout, difficulty, capacity) => {
+    // Garde-fou : une séance déjà validée ne peut pas l'être une seconde fois.
+    if (feedbackHistory.some((f) => f.workoutId === workout.id)) return;
     const analysis = analyzeFeedback(workout, { difficulty, capacity }, feedbackHistory);
     const entry = {
       workoutId: workout.id,
@@ -353,6 +355,7 @@ export default function Home() {
               weekKey={activeWeek}
               workouts={filteredWorkouts}
               onSelectWorkout={setSelectedWorkout}
+              validatedIds={new Set(feedbackHistory.map((f) => f.workoutId))}
             />
           </div>
         )}
@@ -470,13 +473,15 @@ export default function Home() {
 
       </main>
 
-      <WizardModal
-        isOpen={showWizard}
-        onClose={() => setShowWizard(false)}
-        onComplete={handleWizardComplete}
-        submitting={wizardSubmitting}
-        submitError={wizardError}
-      />
+      {showWizard && (
+        <WizardModal
+          isOpen
+          onClose={() => setShowWizard(false)}
+          onComplete={handleWizardComplete}
+          submitting={wizardSubmitting}
+          submitError={wizardError}
+        />
+      )}
 
       <WorkoutDetail
         workout={selectedWorkout}
