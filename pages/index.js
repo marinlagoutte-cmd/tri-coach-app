@@ -20,9 +20,11 @@ const TABS = [
 ];
 
 // Un objectif CAP/Trail n'affiche jamais les filtres BIKE/SWIM — cohérence avec l'objectif choisi.
+// Et si une seule discipline est possible, le bouton "TOUT" est redondant (il affiche
+// exactement la même chose que le filtre unique) donc on ne l'ajoute pas.
 function getSportFilters(sportType) {
   if (sportType === 'running') {
-    return [{ id: 'ALL', label: 'TOUT' }, { id: 'RUN', label: 'RUN' }];
+    return [{ id: 'RUN', label: 'RUN' }];
   }
   return [
     { id: 'ALL', label: 'TOUT' },
@@ -41,15 +43,13 @@ function formatWorkoutSummary(w) {
   return `${w.day} · ${shortLabel(w.type)} — ${w.title} (${w.duration}, ${w.intensity || '-'})`;
 }
 
-const WELCOME_MESSAGE = {
-  sender: 'coach',
-  text: "👋 Salut Marin ! Ton plan d'entraînement est opérationnel. Quelle séance souhaites-tu passer en revue ?",
-};
+const WELCOME_MESSAGE_TEXT = (firstName) =>
+  `👋 Salut${firstName ? ' ' + firstName : ''} ! Ton plan d'entraînement est opérationnel. Quelle séance souhaites-tu passer en revue ?`;
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState('calendar');
   const [activeWeek, setActiveWeek] = useState('N');
-  const [sportFilter, setSportFilter] = useState('ALL');
+  const [sportFilter, setSportFilter] = useState('RUN');
 
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [trainingPlan, setTrainingPlan] = useState(DEFAULT_TRAINING_PLAN);
@@ -62,7 +62,7 @@ export default function Home() {
 
   const [selectedWorkout, setSelectedWorkout] = useState(null);
 
-  const [messages, setMessages] = useState([WELCOME_MESSAGE]);
+  const [messages, setMessages] = useState([{ sender: 'coach', text: WELCOME_MESSAGE_TEXT('') }]);
   const [inputMessage, setInputMessage] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [chatIntent, setChatIntent] = useState(null);
@@ -72,10 +72,11 @@ export default function Home() {
 
   // --- CHARGEMENT INITIAL DEPUIS LE STOCKAGE LOCAL ---
   useEffect(() => {
-    setProfile(loadFromStorage(STORAGE_KEYS.profile, DEFAULT_PROFILE));
+    const loadedProfile = loadFromStorage(STORAGE_KEYS.profile, DEFAULT_PROFILE);
+    setProfile(loadedProfile);
     setTrainingPlan(loadFromStorage(STORAGE_KEYS.plan, DEFAULT_TRAINING_PLAN));
     setWorkouts(loadFromStorage(STORAGE_KEYS.workouts, DEFAULT_WORKOUTS));
-    setMessages(loadFromStorage(STORAGE_KEYS.chat, [WELCOME_MESSAGE]));
+    setMessages(loadFromStorage(STORAGE_KEYS.chat, [{ sender: 'coach', text: WELCOME_MESSAGE_TEXT(loadedProfile.firstName) }]));
     setSportType(loadFromStorage(STORAGE_KEYS.sportType, 'triathlon'));
     setHydrated(true);
   }, []);
@@ -97,15 +98,15 @@ export default function Home() {
 
   const sportFilters = useMemo(() => getSportFilters(sportType), [sportType]);
 
-  // Si l'objectif change pour un format sans vélo/nat, on retombe sur un filtre valide.
+  // Si l'objectif change pour un format sans vélo/nat, on retombe sur le premier filtre valide.
   useEffect(() => {
-    if (!sportFilters.find((f) => f.id === sportFilter)) setSportFilter('ALL');
+    if (!sportFilters.find((f) => f.id === sportFilter)) setSportFilter(sportFilters[0]?.id || 'ALL');
   }, [sportFilters]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredWorkouts = useMemo(() => {
     const list = workouts[activeWeek] || [];
     if (sportFilter === 'ALL') return list;
-    return list.filter((w) => shortLabel(w.type) === sportFilter);
+    return list.filter((w) => shortLabel(w.type) === sportFilter || w.type === 'REPOS');
   }, [workouts, activeWeek, sportFilter]);
 
   // --- GÉNÉRATION D'UN NOUVEAU PLAN VIA L'ASSISTANT ---
@@ -124,6 +125,9 @@ export default function Home() {
       setTrainingPlan(data.trainingPlan);
       setWorkouts(data.workouts);
       setSportType(wizardData.sportType || 'triathlon');
+      if (wizardData.firstName?.trim()) {
+        setProfile((prev) => ({ ...prev, firstName: wizardData.firstName.trim() }));
+      }
       setShowWizard(false);
       setActiveTab('calendar');
 
