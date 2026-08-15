@@ -6,7 +6,7 @@ import WizardModal from '../components/WizardModal';
 import ProfileHealth from '../components/ProfileHealth';
 import { STORAGE_KEYS, loadFromStorage, saveToStorage } from '../lib/storage';
 import { DEFAULT_PROFILE, DEFAULT_TRAINING_PLAN, DEFAULT_WORKOUTS } from '../lib/defaults';
-import { computeRaceStats } from '../lib/workouts';
+import { computeRaceStats, shortLabel } from '../lib/workouts';
 
 const TABS = [
   { id: 'calendar', label: 'Calendrier', icon: '📅' },
@@ -15,12 +15,27 @@ const TABS = [
   { id: 'chat', label: 'Coach Chat', icon: '💬' },
 ];
 
-const SPORT_FILTERS = [
-  { id: 'ALL', label: 'Tout' },
-  { id: 'NATATION', label: 'Nat' },
-  { id: 'CYCLISME', label: 'Vélo' },
-  { id: 'C.A.P', label: 'CAP' },
+// Un objectif CAP/Trail n'affiche jamais les filtres BIKE/SWIM — cohérence avec l'objectif choisi.
+function getSportFilters(sportType) {
+  if (sportType === 'running') {
+    return [{ id: 'ALL', label: 'TOUT' }, { id: 'RUN', label: 'RUN' }];
+  }
+  return [
+    { id: 'ALL', label: 'TOUT' },
+    { id: 'SWIM', label: 'SWIM' },
+    { id: 'BIKE', label: 'BIKE' },
+    { id: 'RUN', label: 'RUN' },
+  ];
+}
+
+const CHAT_INTENTS = [
+  { id: 'add', label: '➕ Ajout d\'une séance supplémentaire' },
+  { id: 'modify', label: '✏️ Modification de séance' },
 ];
+
+function formatWorkoutSummary(w) {
+  return `${w.day} · ${shortLabel(w.type)} — ${w.title} (${w.duration}, ${w.intensity || '-'})`;
+}
 
 const WELCOME_MESSAGE = {
   sender: 'coach',
@@ -46,6 +61,7 @@ export default function Home() {
   const [messages, setMessages] = useState([WELCOME_MESSAGE]);
   const [inputMessage, setInputMessage] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [chatIntent, setChatIntent] = useState(null);
   const chatEndRef = useRef(null);
 
   const [hydrated, setHydrated] = useState(false);
@@ -75,10 +91,17 @@ export default function Home() {
 
   const raceStats = useMemo(() => computeRaceStats(trainingPlan), [trainingPlan]);
 
+  const sportFilters = useMemo(() => getSportFilters(sportType), [sportType]);
+
+  // Si l'objectif change pour un format sans vélo/nat, on retombe sur un filtre valide.
+  useEffect(() => {
+    if (!sportFilters.find((f) => f.id === sportFilter)) setSportFilter('ALL');
+  }, [sportFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const filteredWorkouts = useMemo(() => {
     const list = workouts[activeWeek] || [];
     if (sportFilter === 'ALL') return list;
-    return list.filter((w) => w.type?.toUpperCase().includes(sportFilter));
+    return list.filter((w) => shortLabel(w.type) === sportFilter);
   }, [workouts, activeWeek, sportFilter]);
 
   // --- GÉNÉRATION D'UN NOUVEAU PLAN VIA L'ASSISTANT ---
@@ -122,7 +145,8 @@ export default function Home() {
     if (!inputMessage.trim() || chatLoading) return;
 
     const userText = inputMessage;
-    const newHistory = [...messages, { sender: 'user', text: userText }];
+    const intentPrefix = chatIntent === 'add' ? '[Ajout d\'une séance supplémentaire] ' : chatIntent === 'modify' ? '[Modification de séance] ' : '';
+    const newHistory = [...messages, { sender: 'user', text: intentPrefix + userText }];
     setMessages(newHistory);
     setInputMessage('');
     setChatLoading(true);
@@ -131,12 +155,33 @@ export default function Home() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userText, profile, workouts, trainingPlan }),
+        body: JSON.stringify({ message: userText, profile, workouts, trainingPlan, intent: chatIntent }),
       });
       const data = await res.json();
 
-      if (data.updatedWorkouts) setWorkouts(data.updatedWorkouts);
-      setMessages([...newHistory, { sender: 'coach', text: data.reply || "J'ai bien pris en compte ta demande." }]);
+      const nextMessages = [...newHistory];
+
+      if (data.updatedWorkouts) {
+        // Séances modifiées : on affiche clairement AVANT (ancienne) au-dessus de APRÈS (nouvelle).
+        const allNew = [...(data.updatedWorkouts.N || []), ...(data.updatedWorkouts['N+1'] || [])];
+        const diffLines = allNew
+          .filter((w) => w.previous)
+          .map((w) => `- **AVANT** : ${formatWorkoutSummary(w.previous)}\n  **APRÈS** : ${formatWorkoutSummary(w)}`);
+        const addedLines = allNew
+          .filter((w) => w.added)
+          .map((w) => `- **AJOUTÉE** : ${formatWorkoutSummary(w)}`);
+        if (diffLines.length) {
+          nextMessages.push({ sender: 'coach', text: `🔄 **Comparaison de la séance modifiée**\n${diffLines.join('\n')}` });
+        }
+        if (addedLines.length) {
+          nextMessages.push({ sender: 'coach', text: `➕ **Nouvelle séance ajoutée**\n${addedLines.join('\n')}` });
+        }
+        setWorkouts(data.updatedWorkouts);
+      }
+
+      nextMessages.push({ sender: 'coach', text: data.reply || "J'ai bien pris en compte ta demande." });
+      setMessages(nextMessages);
+      setChatIntent(null);
     } catch (err) {
       setMessages([
         ...newHistory,
@@ -224,7 +269,7 @@ export default function Home() {
               </div>
 
               <div className="flex gap-1.5 overflow-x-auto">
-                {SPORT_FILTERS.map((f) => (
+                {sportFilters.map((f) => (
                   <button
                     key={f.id}
                     onClick={() => setSportFilter(f.id)}
@@ -321,6 +366,23 @@ export default function Home() {
                 </div>
               )}
               <div ref={chatEndRef} />
+            </div>
+
+            <div className="flex gap-1.5">
+              {CHAT_INTENTS.map((ci) => (
+                <button
+                  key={ci.id}
+                  type="button"
+                  onClick={() => setChatIntent(chatIntent === ci.id ? null : ci.id)}
+                  className={`flex-1 text-[10px] font-bold px-2 py-2 rounded-xl border transition-all ${
+                    chatIntent === ci.id
+                      ? 'bg-orange-500/10 border-orange-500 text-orange-400'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  {ci.label}
+                </button>
+              ))}
             </div>
 
             <form onSubmit={handleSendMessage} className="flex space-x-2 pt-2">
