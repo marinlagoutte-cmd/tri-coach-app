@@ -365,8 +365,8 @@ export default function Home() {
           <div className="space-y-4">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
               <span className="text-[10px] font-mono text-orange-400 uppercase tracking-widest block">Objectif en cours</span>
-              <h2 className="text-lg font-black text-white font-display">{trainingPlan.title}</h2>
-              <p className="text-xs text-slate-400 font-mono">{trainingPlan.date}</p>
+              <h2 className="text-lg font-black text-white font-display">{trainingPlan?.title || 'Objectif à définir'}</h2>
+              <p className="text-xs text-slate-400 font-mono">{trainingPlan?.date || ''}</p>
 
               <div className="grid grid-cols-3 gap-2 text-center pt-2">
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
@@ -383,7 +383,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {trainingPlan.splits && (
+              {trainingPlan?.splits && (
                 <div className="grid grid-cols-3 gap-2 text-center pt-1 text-[11px] font-mono">
                   <div><span className="text-cyan-400 block">🏊 {trainingPlan.splits.nat}</span></div>
                   <div><span className="text-amber-400 block">🚴 {trainingPlan.splits.bike}</span></div>
@@ -392,7 +392,7 @@ export default function Home() {
               )}
             </div>
 
-            {trainingPlan.cycles?.length > 0 && (
+            {trainingPlan?.cycles?.length > 0 && (
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
                 <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest block mb-1">Macrocycles</span>
                 {trainingPlan.cycles.map((c) => (
