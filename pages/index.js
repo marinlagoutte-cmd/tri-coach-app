@@ -44,6 +44,16 @@ function formatWorkoutSummary(w) {
   return `${w.day} · ${shortLabel(w.type)} — ${w.title} (${w.duration}, ${w.intensity || '-'})`;
 }
 
+// La date de l'objectif est stockée au format ISO (YYYY-MM-DD, voir lib/defaults.js /
+// lib/gemini.js) pour que le compte à rebours (computeRaceStats) puisse la parser de
+// façon fiable — on la reformate ici uniquement pour l'affichage, en français lisible.
+function formatRaceDate(isoDate) {
+  if (!isoDate) return '';
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return isoDate; // fallback : affiche la valeur brute plutôt que rien
+  return new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }).format(d);
+}
+
 const WELCOME_MESSAGE_TEXT = (firstName) =>
   `👋 Salut${firstName ? ' ' + firstName : ''} ! Ton plan d'entraînement est opérationnel. Quelle séance souhaites-tu passer en revue ?`;
 
@@ -405,16 +415,16 @@ export default function Home() {
               <div className="absolute -top-10 -right-10 w-32 h-32 rounded-full bg-volt-600/20 blur-3xl pointer-events-none" />
               <span className="text-[10px] font-mono text-volt-400 uppercase tracking-widest block">Objectif en cours</span>
               <h2 className="text-lg font-black text-white font-display">{trainingPlan?.title || 'Objectif à définir'}</h2>
-              <p className="text-xs text-ink-400 font-mono">{trainingPlan?.date || ''}</p>
+              <p className="text-xs text-ink-400 font-mono">{formatRaceDate(trainingPlan?.date)}</p>
 
               <div className="grid grid-cols-3 gap-2 text-center pt-2">
                 <div className="bg-ink-950 border border-ink-800 rounded-xl p-2.5">
                   <span className="text-[9px] text-ink-500 uppercase block">Jours restants</span>
-                  <span className="text-base font-black text-volt-400 font-mono">{raceStats.daysLeft}</span>
+                  <span className="text-base font-black text-volt-400 font-mono">{raceStats.dateIsValid ? raceStats.daysLeft : '—'}</span>
                 </div>
                 <div className="bg-ink-950 border border-ink-800 rounded-xl p-2.5">
                   <span className="text-[9px] text-ink-500 uppercase block">Semaines</span>
-                  <span className="text-base font-black text-white font-mono">{raceStats.weeksLeft}</span>
+                  <span className="text-base font-black text-white font-mono">{raceStats.dateIsValid ? raceStats.weeksLeft : '—'}</span>
                 </div>
                 <div className="bg-ink-950 border border-ink-800 rounded-xl p-2.5">
                   <span className="text-[9px] text-ink-500 uppercase block">Progression</span>
