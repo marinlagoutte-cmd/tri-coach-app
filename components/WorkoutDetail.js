@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { shortLabel, getDetailFields } from '../lib/workouts';
 
+
 function RatingSlider({ label, value, onChange, hint }) {
   return (
     <div>
