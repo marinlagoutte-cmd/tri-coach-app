@@ -21,6 +21,8 @@ export default function ProfileHealth({ profile, onProfileChange, sportType = 't
   const [entryValue, setEntryValue] = useState('');
 
   const visibleMetrics = METRICS.filter((m) => !(sportType === 'running' && m.hideForRunning));
+  const missingMetrics = visibleMetrics.filter((m) => profile[m.key] === null || profile[m.key] === undefined || profile[m.key] === '');
+  const nat100Missing = sportType !== 'running' && !profile.nat100;
 
   useEffect(() => {
     setHistory(loadFromStorage(STORAGE_KEYS.healthHistory, []));
@@ -90,10 +92,20 @@ export default function ProfileHealth({ profile, onProfileChange, sportType = 't
         <span className="text-[9px] text-slate-500">1 clic = 1 courbe · 2 clics = superposition</span>
       </div>
 
+      {(missingMetrics.length > 0 || nat100Missing) && (
+        <div className="p-3 rounded-xl border border-amber-800/60 bg-amber-950/30 text-amber-300 text-[11px] leading-relaxed">
+          ⚠️ {missingMetrics.length + (nat100Missing ? 1 : 0)} donnée(s) non renseignée(s)
+          ({[...missingMetrics.map((m) => m.label), ...(nat100Missing ? ['CSS natation'] : [])].join(', ')}).
+          Pense à les remplir au fur et à mesure (ci-dessous, ou lors de la génération d'un nouveau plan) :
+          tant qu'elles sont vides, le coach IA reste volontairement prudent et évite de calculer des allures/puissances précises pour ces disciplines.
+        </div>
+      )}
+
       {/* Menus des métriques */}
       <div className="grid grid-cols-3 sm:grid-cols-3 gap-2">
         {visibleMetrics.map((m) => {
           const rank = selectedMetrics.indexOf(m.key);
+          const hasValue = profile[m.key] !== null && profile[m.key] !== undefined && profile[m.key] !== '';
           return (
             <button
               key={m.key}
@@ -108,9 +120,13 @@ export default function ProfileHealth({ profile, onProfileChange, sportType = 't
                 <span className="absolute top-1 right-1.5 text-[9px] font-bold text-orange-400">{rank + 1}</span>
               )}
               <span className="text-[9px] text-slate-500 uppercase block">{m.label}</span>
-              <span className="text-sm font-bold font-mono" style={{ color: m.color }}>
-                {profile[m.key] ?? '-'} <span className="text-[9px] text-slate-500">{m.unit}</span>
-              </span>
+              {hasValue ? (
+                <span className="text-sm font-bold font-mono" style={{ color: m.color }}>
+                  {profile[m.key]} <span className="text-[9px] text-slate-500">{m.unit}</span>
+                </span>
+              ) : (
+                <span className="text-xs font-semibold text-slate-600 italic">Non renseigné</span>
+              )}
             </button>
           );
         })}
@@ -120,8 +136,9 @@ export default function ProfileHealth({ profile, onProfileChange, sportType = 't
             <input
               type="text"
               value={profile.nat100 || ''}
-              onChange={(e) => onProfileChange({ ...profile, nat100: e.target.value })}
-              className="w-full bg-transparent text-sm font-bold font-mono text-cyan-400 focus:outline-none"
+              onChange={(e) => onProfileChange({ ...profile, nat100: e.target.value || null })}
+              placeholder="Non renseigné"
+              className="w-full bg-transparent text-sm font-bold font-mono text-cyan-400 placeholder-slate-600 focus:outline-none"
             />
           </div>
         )}
