@@ -1,0 +1,28 @@
+{
+  "name": "tri-coach-app",
+  "version": "0.4.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "@supabase/supabase-js": "^2.45.4",
+    "chart.js": "^4.4.0",
+    "leaflet": "^1.9.4",
+    "next": "^14.0.0",
+    "react": "^18.0.0",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18.0.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "vitest": "^1.2.1"
+  }
+}
