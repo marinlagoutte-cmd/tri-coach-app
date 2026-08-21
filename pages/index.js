@@ -9,6 +9,7 @@ import NutritionPanel from '../components/NutritionPanel';
 import WeatherPanel from '../components/WeatherPanel';
 import ActivityDetail from '../components/ActivityDetail';
 import TrainingLoadChart from '../components/TrainingLoadChart';
+import WeeklyProgressChart from '../components/WeeklyProgressChart';
 import RaceExecutionPlan from '../components/RaceExecutionPlan';
 import { STORAGE_KEYS, loadFromStorage, saveToStorage, setStorageSaveHook } from '../lib/storage';
 import { DEFAULT_PROFILE, DEFAULT_TRAINING_PLAN, DEFAULT_WORKOUTS, EMPTY_TRAINING_PLAN, EMPTY_WORKOUTS } from '../lib/defaults';
@@ -239,7 +240,10 @@ export default function Home() {
       .from('strava_activities')
       .select('*')
       .order('start_date', { ascending: false })
-      .limit(40);
+      // 150 (pas 40) : la courbe "Progression" (WeeklyProgressChart) et la charge d'entraînement
+      // (TrainingLoadChart, fenêtre CTL de 42 jours) veulent 12 semaines d'historique complètes —
+      // 40 activités ne suffisent plus dès qu'on dépasse ~3-4 séances/semaine en moyenne.
+      .limit(150);
     if (!error && data) setStravaActivities(data);
   };
 
@@ -857,6 +861,8 @@ export default function Home() {
             <RaceExecutionPlan constraints={constraints} profile={profile} onGoToNutrition={() => setActiveTab('nutrition')} />
 
             <TrainingLoadChart activities={stravaActivities} profile={profile} workouts={workouts} />
+
+            <WeeklyProgressChart activities={stravaActivities} />
 
             {trainingPlan?.cycles?.length > 0 && (
               <div className="bg-ink-900 border border-ink-800 rounded-2xl p-4 space-y-1">
