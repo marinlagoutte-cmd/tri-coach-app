@@ -289,6 +289,8 @@ export default function ActivityDetail({ activity, session, workouts, onClose, o
             <p className="text-xs text-ink-200 leading-relaxed whitespace-pre-line">{activity.ai_analysis}</p>
           ) : activity.ai_analysis_status === 'error' ? (
             <p className="text-[11px] text-ink-500">L'analyse IA n'a pas pu être générée pour cette activité (service temporairement indisponible).</p>
+          ) : activity.ai_analysis_status === 'skipped' ? (
+            <p className="text-[11px] text-ink-500">Pas d'analyse IA pour cette activité (importée en masse depuis Réglages — l'analyse prévu/réalisé n'est générée automatiquement que pour les nouvelles activités).</p>
           ) : (
             <p className="text-[11px] text-ink-500">Analyse en cours de génération…</p>
           )}
