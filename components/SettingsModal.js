@@ -7,7 +7,7 @@ import { buildStravaAuthUrl, isStravaClientConfigured } from '../lib/stravaClien
 // NOTE : le bloc Strava est masqué tant que NEXT_PUBLIC_STRAVA_CLIENT_ID n'est pas
 // défini côté Vercel — voir STRAVA_SETUP.md.
 
-export default function SettingsModal({ isOpen, onClose, session, onSignOut }) {
+export default function SettingsModal({ isOpen, onClose, session, onSignOut, onStravaSynced }) {
   const { t, lang, setLang } = useI18n();
   const { theme, setTheme } = useTheme();
   const [confirming, setConfirming] = useState(false);
@@ -18,6 +18,8 @@ export default function SettingsModal({ isOpen, onClose, session, onSignOut }) {
   const [stravaStatus, setStravaStatus] = useState('loading'); // 'loading' | 'connected' | 'disconnected'
   const [stravaBusy, setStravaBusy] = useState(false);
   const [stravaError, setStravaError] = useState('');
+  const [stravaSyncing, setStravaSyncing] = useState(false);
+  const [stravaSyncMessage, setStravaSyncMessage] = useState('');
 
   useEffect(() => {
     if (!isOpen || !session?.access_token || !isStravaClientConfigured()) return;
@@ -56,6 +58,28 @@ export default function SettingsModal({ isOpen, onClose, session, onSignOut }) {
       setStravaError(t('settings.stravaDisconnectError'));
     } finally {
       setStravaBusy(false);
+    }
+  };
+
+  const handleStravaSync = async () => {
+    if (!session?.access_token) return;
+    setStravaSyncing(true);
+    setStravaError('');
+    setStravaSyncMessage('');
+    try {
+      const res = await fetch('/api/strava/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: session.access_token }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'sync failed');
+      setStravaSyncMessage(t('settings.stravaSyncSuccess')(data.imported || 0, data.skipped || 0));
+      if (data.imported > 0 && onStravaSynced) onStravaSynced();
+    } catch (e) {
+      setStravaError(e.message || t('settings.stravaSyncError'));
+    } finally {
+      setStravaSyncing(false);
     }
   };
 
@@ -167,6 +191,16 @@ export default function SettingsModal({ isOpen, onClose, session, onSignOut }) {
                 <>
                   <p className="text-xs font-bold text-ink-50">✅ {t('settings.stravaConnected')}</p>
                   <p className="text-[10px] text-ink-500 leading-relaxed">{t('settings.stravaConnectedHint')}</p>
+                  <p className="text-[10px] text-ink-500 leading-relaxed">{t('settings.stravaSyncHint')}</p>
+                  <button
+                    onClick={handleStravaSync}
+                    disabled={stravaSyncing}
+                    className="w-full text-xs font-bold text-white px-3 py-2 rounded-xl disabled:opacity-50"
+                    style={{ backgroundColor: '#FC4C02' }}
+                  >
+                    {stravaSyncing ? t('settings.stravaSyncing') : t('settings.stravaSync')}
+                  </button>
+                  {stravaSyncMessage && <p className="text-[10px] text-emerald-400">{stravaSyncMessage}</p>}
                   <button
                     onClick={handleStravaDisconnect}
                     disabled={stravaBusy}
