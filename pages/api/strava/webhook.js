@@ -10,62 +10,15 @@
 // POST : événement d'activité. Toujours répondu 200 rapidement (Strava
 //        réessaie sinon) ; le traitement (fetch activité + IA) est idempotent
 //        (upsert par id d'activité) pour tolérer d'éventuels doublons de retry.
-import { createClient } from '@supabase/supabase-js';
 import { waitUntil } from '@vercel/functions';
-import { ensureValidStravaToken, fetchStravaActivity } from '../../../lib/strava';
+import { ensureValidStravaToken, fetchStravaActivity, toActivityRow } from '../../../lib/strava';
 import { findAutoMatch } from '../../../lib/stravaMatch';
 import { analyzeStravaActivity } from '../../../lib/gemini';
-import { STORAGE_KEYS } from '../../../lib/storage';
+import { getAdminClient, loadAthleteContext } from '../../../lib/athleteContext';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const VERIFY_TOKEN = process.env.STRAVA_WEBHOOK_VERIFY_TOKEN;
-
-function getAdminClient() {
-  return createClient(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } });
-}
-
-/** Relit le profil/plan/langue de l'athlète depuis le snapshot cloud (voir lib/cloudSync.js) —
- * seule source disponible côté serveur, puisque ces données vivent en localStorage côté client. */
-async function loadAthleteContext(admin, userId) {
-  const { data } = await admin.from('tri_coach_data').select('snapshot').eq('user_id', userId).maybeSingle();
-  const snapshot = data?.snapshot || {};
-  const parse = (key, fallback) => {
-    try {
-      return snapshot[key] ? JSON.parse(snapshot[key]) : fallback;
-    } catch {
-      return fallback;
-    }
-  };
-  return {
-    profile: parse(STORAGE_KEYS.profile, null),
-    workouts: parse(STORAGE_KEYS.workouts, { N: [], 'N+1': [] }),
-    language: parse(STORAGE_KEYS.language, 'fr'),
-  };
-}
-
-function toActivityRow(raw, userId) {
-  return {
-    id: raw.id,
-    user_id: userId,
-    sport_type: raw.sport_type || raw.type || null,
-    name: raw.name || null,
-    start_date: raw.start_date,
-    start_date_local: raw.start_date_local,
-    timezone: raw.timezone || null,
-    distance_m: raw.distance ?? null,
-    moving_time_s: raw.moving_time ?? null,
-    elapsed_time_s: raw.elapsed_time ?? null,
-    total_elevation_m: raw.total_elevation_gain ?? null,
-    average_speed_ms: raw.average_speed ?? null,
-    max_speed_ms: raw.max_speed ?? null,
-    average_heartrate: raw.average_heartrate ?? null,
-    max_heartrate: raw.max_heartrate ?? null,
-    average_watts: raw.average_watts ?? null,
-    max_watts: raw.max_watts ?? null,
-    summary_polyline: raw.map?.summary_polyline || null,
-  };
-}
 
 async function handleActivityUpsert({ admin, athleteId, activityId, isUpdate }) {
   const { data: tokenRow } = await admin
