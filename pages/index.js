@@ -664,6 +664,7 @@ export default function Home() {
         onClose={() => setShowSettings(false)}
         session={session}
         onSignOut={handleSignOut}
+        onStravaSynced={refreshStravaActivities}
       />
 
       {/* Liseré tri-spectrum (nat/vélo/course) : signature visuelle discrète de l'app,
