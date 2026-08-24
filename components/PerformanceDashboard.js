@@ -11,7 +11,7 @@ import {
   Legend,
 } from 'chart.js';
 import { STORAGE_KEYS, loadFromStorage } from '../lib/storage';
-import { computeWeeklyDurationByDiscipline, computeZoneMinutes, computeFeedbackTrendSeries, computeKeyMetrics } from '../lib/analytics';
+import { computeWeeklyDurationByDiscipline, computeActualWeeklyDurationByDiscipline, computeZoneMinutes, computeFeedbackTrendSeries, computeKeyMetrics } from '../lib/analytics';
 import ZoneCharts from './ZoneCharts';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend);
@@ -44,15 +44,62 @@ function FormSparkline({ capacity }) {
 
 export default function PerformanceDashboard({ profile, workouts, feedbackHistory, sportType = 'triathlon', stravaActivities = [], onPaceZonesChange }) {
   const [healthHistory, setHealthHistory] = useState([]);
+  const [plannedWeek, setPlannedWeek] = useState('N');
 
   useEffect(() => {
     setHealthHistory(loadFromStorage(STORAGE_KEYS.healthHistory, []));
   }, []);
 
   const volume = computeWeeklyDurationByDiscipline(workouts || {});
+  const actualVolume = computeActualWeeklyDurationByDiscipline(stravaActivities);
   const zones = computeZoneMinutes(workouts?.N || []);
   const trend = computeFeedbackTrendSeries(feedbackHistory || []);
   const metrics = computeKeyMetrics(profile || {}, healthHistory, sportType);
+
+  // "Semaine en cours" est toujours à l'index 0 (voir tri N avant N+1 dans
+  // computeWeeklyDurationByDiscipline) — le bouton N+1 n'apparaît que si cette semaine
+  // existe réellement en mémoire (workouts['N+1']).
+  const hasNextWeek = volume.labels.length > 1;
+  const plannedWeekIndex = plannedWeek === 'N' ? 0 : 1;
+  const plannedWeekLabel = volume.labels[plannedWeekIndex] || volume.labels[0];
+  const plannedSingleWeekData = {
+    labels: volume.disciplines.map((d) => d.label),
+    datasets: [
+      {
+        label: plannedWeekLabel,
+        data: volume.disciplines.map((d) => volume.series[d.key]?.[plannedWeekIndex] ?? 0),
+        backgroundColor: volume.disciplines.map((d) => d.color),
+        borderRadius: 6,
+        maxBarThickness: 42,
+      },
+    ],
+  };
+  const actualSingleWeekData = {
+    labels: actualVolume.disciplines.map((d) => d.label),
+    datasets: [
+      {
+        label: actualVolume.label,
+        data: actualVolume.disciplines.map((d) => actualVolume.series[d.key] ?? 0),
+        backgroundColor: actualVolume.disciplines.map((d) => d.color),
+        borderRadius: 6,
+        maxBarThickness: 42,
+      },
+    ],
+  };
+  const singleWeekOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    layout: { padding: { top: 4, right: 8 } },
+    plugins: {
+      legend: { display: false },
+      tooltip: { titleFont: { size: 12 }, bodyFont: { size: 12 }, callbacks: { label: (ctx) => `${ctx.parsed.y} h` } },
+    },
+    scales: {
+      y: { beginAtZero: true, ticks: { color: AXIS_COLOR, font: { size: 11 }, callback: (v) => `${v}h` }, grid: { color: GRID_COLOR } },
+      x: { ticks: { color: '#3D434C', font: { size: 12, weight: '600' } }, grid: { display: false } },
+    },
+  };
+  const actualVolumeTotal = actualVolume.disciplines.reduce((sum, d) => sum + (actualVolume.series[d.key] || 0), 0);
 
   const trendData = {
     labels: trend.labels,
@@ -72,30 +119,6 @@ export default function PerformanceDashboard({ profile, workouts, feedbackHistor
     scales: {
       y: { min: 0, max: 10, ticks: { color: AXIS_COLOR, stepSize: 2, font: { size: 11 } }, grid: { color: GRID_COLOR } },
       x: { ticks: { color: AXIS_COLOR, font: { size: 11 } }, grid: { display: false } },
-    },
-  };
-
-  const volumeData = {
-    labels: volume.labels,
-    datasets: volume.disciplines.map((d) => ({
-      label: d.label,
-      data: volume.series[d.key],
-      backgroundColor: d.color,
-      borderRadius: 6,
-      maxBarThickness: 42,
-    })),
-  };
-  const volumeOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    layout: { padding: { top: 4, right: 8 } },
-    plugins: {
-      legend: { position: 'bottom', labels: { color: '#3D434C', font: { size: 11, weight: '600' }, boxWidth: 10, padding: 12 } },
-      tooltip: { titleFont: { size: 12 }, bodyFont: { size: 12 }, callbacks: { label: (ctx) => `${ctx.dataset.label} : ${ctx.parsed.y} h` } },
-    },
-    scales: {
-      y: { beginAtZero: true, ticks: { color: AXIS_COLOR, font: { size: 11 }, callback: (v) => `${v}h` }, grid: { color: GRID_COLOR } },
-      x: { ticks: { color: '#3D434C', font: { size: 12, weight: '600' } }, grid: { display: false } },
     },
   };
 
@@ -127,17 +150,55 @@ export default function PerformanceDashboard({ profile, workouts, feedbackHistor
           )}
         </div>
 
-        {/* Volume prévu par discipline — 100% réel : les 2 semaines réellement en mémoire (N / N+1) */}
-        <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
-          <p className="text-xs font-bold text-ink-50">Volume prévu</p>
-          <p className="text-[10px] text-ink-500 mb-2">Heures par discipline — semaine en cours et suivante</p>
-          {volume.labels.length > 0 ? (
-            <div className="relative h-56 sm:h-64">
-              <Bar data={volumeData} options={volumeOptions} />
+        {/* Volume prévu (bouton semaine en cours / N+1) et volume réellement effectué
+            (toujours semaine en cours, seule fenêtre où une activité Strava peut exister)
+            côte à côte pour comparer d'un coup d'œil. */}
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap mb-0.5">
+              <p className="text-xs font-bold text-ink-50">Volume prévu</p>
+              {hasNextWeek && (
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => setPlannedWeek('N')}
+                    className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                      plannedWeek === 'N' ? 'text-volt-400 border-volt-500/30 bg-volt-500/10' : 'text-ink-500 border-ink-700 bg-ink-900'
+                    }`}
+                  >
+                    Semaine en cours
+                  </button>
+                  <button
+                    onClick={() => setPlannedWeek('N+1')}
+                    className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                      plannedWeek === 'N+1' ? 'text-volt-400 border-volt-500/30 bg-volt-500/10' : 'text-ink-500 border-ink-700 bg-ink-900'
+                    }`}
+                  >
+                    Semaine N+1
+                  </button>
+                </div>
+              )}
             </div>
-          ) : (
-            <p className="text-xs text-ink-500 text-center py-8">Aucun plan généré pour l'instant.</p>
-          )}
+            <p className="text-[10px] text-ink-500 mb-2">Heures par discipline — {plannedWeek === 'N' ? 'semaine en cours' : 'semaine N+1'}</p>
+            {volume.labels.length > 0 ? (
+              <div className="relative h-56 sm:h-64">
+                <Bar data={plannedSingleWeekData} options={singleWeekOptions} />
+              </div>
+            ) : (
+              <p className="text-xs text-ink-500 text-center py-8">Aucun plan généré pour l'instant.</p>
+            )}
+          </div>
+
+          <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
+            <p className="text-xs font-bold text-ink-50">Volume réalisé</p>
+            <p className="text-[10px] text-ink-500 mb-2">Heures par discipline — semaine en cours (activités Strava)</p>
+            {actualVolume.hasAnyActivityThisWeek && actualVolumeTotal > 0 ? (
+              <div className="relative h-56 sm:h-64">
+                <Bar data={actualSingleWeekData} options={singleWeekOptions} />
+              </div>
+            ) : (
+              <p className="text-xs text-ink-500 text-center py-8">Aucune activité Strava synchronisée pour la semaine en cours.</p>
+            )}
+          </div>
         </div>
 
         <div className="grid sm:grid-cols-2 gap-4">
@@ -198,5 +259,3 @@ export default function PerformanceDashboard({ profile, workouts, feedbackHistor
     </div>
   );
 }
-
-
