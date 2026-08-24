@@ -1,299 +1,260 @@
-import React, { useEffect, useState } from 'react';
-import { STORAGE_KEYS, loadFromStorage, saveToStorage } from '../lib/storage';
+import { useEffect, useState } from 'react';
+import { Line, Bar } from 'react-chartjs-2';
 import {
-  defaultHrZones,
-  defaultPowerZones,
-  defaultPaceZones,
-  computeZoneDistributionFromActivities,
-  BIKE_SPORTS,
-  RUN_SPORTS,
-} from '../lib/zones';
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+import { STORAGE_KEYS, loadFromStorage } from '../lib/storage';
+import { computeWeeklyDurationByDiscipline, computeActualWeeklyDurationByDiscipline, computeZoneMinutes, computeFeedbackTrendSeries, computeKeyMetrics } from '../lib/analytics';
+import ZoneCharts from './ZoneCharts';
 
-/** "4:30" (m:ss) → vitesse en km/h. Retourne null si le format n'est pas valide. */
-function paceStrToSpeedKmh(str) {
-  const m = String(str ?? '').trim().match(/^(\d+):([0-5]\d)$/);
-  if (!m) return null;
-  const paceMin = Number(m[1]) + Number(m[2]) / 60;
-  return paceMin > 0 ? 60 / paceMin : null;
-}
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend);
 
-/** Vitesse en km/h → "4:30" (m:ss/km), pour l'affichage/édition. */
-function speedKmhToPaceStr(speedKmh) {
-  if (!Number.isFinite(speedKmh) || speedKmh <= 0) return '-:--';
-  const paceMin = 60 / speedKmh;
-  const min = Math.floor(paceMin);
-  const sec = Math.round((paceMin - min) * 60);
-  return `${min}:${String(sec).padStart(2, '0')}`;
-}
+const AXIS_COLOR = '#565D67';
+const GRID_COLOR = 'rgba(16, 19, 26, 0.08)';
 
-const SPORT_TABS = [
-  { key: 'bike', label: '🚴 Vélo' },
-  { key: 'run', label: '🏃 Course' },
-];
-
-/** Une ligne de zone : barre de répartition (temps réel Strava) + borne basse éditable. */
-function ZoneRow({ zone, unit, onMinChange }) {
+// Sparkline "forme" compacte dans l'en-tête : lecture en un coup d'œil de la
+// tendance récente (capacity ressentie, données réelles de feedbackHistory —
+// pas de CTL/ATL inventé), le graphe détaillé plus bas restant la vue complète.
+function FormSparkline({ capacity }) {
+  const points = capacity.filter((v) => v !== null && v !== undefined).slice(-8);
+  if (points.length < 2) return null;
+  const w = 72;
+  const h = 24;
+  const min = 0;
+  const max = 10;
+  const stepX = w / (points.length - 1);
+  const coords = points.map((v, i) => `${(i * stepX).toFixed(1)},${(h - ((v - min) / (max - min)) * h).toFixed(1)}`);
+  const last = points[points.length - 1];
+  const first = points[0];
+  const color = last >= first ? '#34D399' : '#FBBF24';
   return (
-    <div className="flex items-center gap-2 text-[11px]">
-      <span className="w-6 font-bold shrink-0" style={{ color: zone.color }}>{zone.zone}</span>
-      <span className="w-[4.5rem] text-ink-400 truncate shrink-0">{zone.label}</span>
-      <div className="flex-1 h-2 rounded-full bg-ink-800 overflow-hidden min-w-[1.5rem]">
-        <div className="h-full rounded-full transition-all" style={{ width: `${zone.pct}%`, backgroundColor: zone.color }} />
-      </div>
-      <span className="w-11 text-right text-ink-300 font-mono shrink-0">{zone.minutes}m</span>
-      <span className="w-8 text-right font-mono shrink-0" style={{ color: zone.color }}>{zone.pct}%</span>
-      <span className="flex items-center gap-0.5 shrink-0">
-        <span className="text-[9px] text-ink-600">≥</span>
-        <input
-          type="number"
-          value={zone.min}
-          onChange={(e) => onMinChange(Number(e.target.value) || 0)}
-          className="w-12 bg-ink-950 border border-ink-800 rounded px-1 py-0.5 text-[10px] text-ink-100 font-mono"
-        />
-        <span className="text-[9px] text-ink-600">{unit}</span>
-      </span>
-    </div>
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="shrink-0" title={`Forme ressentie : ${first} → ${last} sur les ${points.length} dernières validations`}>
+      <polyline points={coords.join(' ')} fill="none" stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={coords[coords.length - 1].split(',')[0]} cy={coords[coords.length - 1].split(',')[1]} r="2" fill={color} />
+    </svg>
   );
 }
 
-/** Bloc complet (FC ou Puissance) : switch vélo/course + barres + édition des bornes. */
-function ZoneBlock({ title, unit, metric, zonesBySport, onZonesBySportChange, activeSport, onSportChange, activities, onResetSport }) {
-  const zones = zonesBySport[activeSport];
-  const sports = activeSport === 'bike' ? BIKE_SPORTS : RUN_SPORTS;
-  const distribution = computeZoneDistributionFromActivities(activities, zones, { metric, sports });
+export default function PerformanceDashboard({ profile, workouts, feedbackHistory, sportType = 'triathlon', stravaActivities = [], onPaceZonesChange }) {
+  const [healthHistory, setHealthHistory] = useState([]);
+  const [plannedWeek, setPlannedWeek] = useState('N');
 
-  const updateMin = (idx, value) => {
-    const nextZones = zones.map((z, i) => (i === idx ? { ...z, min: value } : z));
-    onZonesBySportChange({ ...zonesBySport, [activeSport]: nextZones });
+  useEffect(() => {
+    setHealthHistory(loadFromStorage(STORAGE_KEYS.healthHistory, []));
+  }, []);
+
+  const volume = computeWeeklyDurationByDiscipline(workouts || {});
+  const actualVolume = computeActualWeeklyDurationByDiscipline(stravaActivities);
+  const zones = computeZoneMinutes(workouts?.N || []);
+  const trend = computeFeedbackTrendSeries(feedbackHistory || []);
+  const metrics = computeKeyMetrics(profile || {}, healthHistory, sportType);
+
+  // "Semaine en cours" est toujours à l'index 0 (voir tri N avant N+1 dans
+  // computeWeeklyDurationByDiscipline) — le bouton N+1 n'apparaît que si cette semaine
+  // existe réellement en mémoire (workouts['N+1']).
+  const hasNextWeek = volume.labels.length > 1;
+  const plannedWeekIndex = plannedWeek === 'N' ? 0 : 1;
+  const plannedWeekLabel = volume.labels[plannedWeekIndex] || volume.labels[0];
+  const plannedSingleWeekData = {
+    labels: volume.disciplines.map((d) => d.label),
+    datasets: [
+      {
+        label: plannedWeekLabel,
+        data: volume.disciplines.map((d) => volume.series[d.key]?.[plannedWeekIndex] ?? 0),
+        backgroundColor: volume.disciplines.map((d) => d.color),
+        borderRadius: 6,
+        maxBarThickness: 42,
+      },
+    ],
+  };
+  const actualSingleWeekData = {
+    labels: actualVolume.disciplines.map((d) => d.label),
+    datasets: [
+      {
+        label: actualVolume.label,
+        data: actualVolume.disciplines.map((d) => actualVolume.series[d.key] ?? 0),
+        backgroundColor: actualVolume.disciplines.map((d) => d.color),
+        borderRadius: 6,
+        maxBarThickness: 42,
+      },
+    ],
+  };
+  const singleWeekOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    layout: { padding: { top: 4, right: 8 } },
+    plugins: {
+      legend: { display: false },
+      tooltip: { titleFont: { size: 12 }, bodyFont: { size: 12 }, callbacks: { label: (ctx) => `${ctx.parsed.y} h` } },
+    },
+    scales: {
+      y: { beginAtZero: true, ticks: { color: AXIS_COLOR, font: { size: 11 }, callback: (v) => `${v}h` }, grid: { color: GRID_COLOR } },
+      x: { ticks: { color: '#3D434C', font: { size: 12, weight: '600' } }, grid: { display: false } },
+    },
+  };
+  const actualVolumeTotal = actualVolume.disciplines.reduce((sum, d) => sum + (actualVolume.series[d.key] || 0), 0);
+
+  const trendData = {
+    labels: trend.labels,
+    datasets: [
+      { label: 'Difficulté ressentie /10', data: trend.difficulty, borderColor: '#FB7185', backgroundColor: '#FB7185', tension: 0.3, spanGaps: true, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2.5 },
+      { label: 'Forme ressentie /10', data: trend.capacity, borderColor: '#34D399', backgroundColor: '#34D399', tension: 0.3, spanGaps: true, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2.5 },
+    ],
+  };
+  const trendOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    layout: { padding: { top: 4, right: 8 } },
+    plugins: {
+      legend: { position: 'bottom', labels: { color: '#3D434C', font: { size: 11, weight: '600' }, boxWidth: 10, padding: 12 } },
+      tooltip: { titleFont: { size: 12 }, bodyFont: { size: 12 } },
+    },
+    scales: {
+      y: { min: 0, max: 10, ticks: { color: AXIS_COLOR, stepSize: 2, font: { size: 11 } }, grid: { color: GRID_COLOR } },
+      x: { ticks: { color: AXIS_COLOR, font: { size: 11 } }, grid: { display: false } },
+    },
   };
 
+  const zonesTotalMinutes = zones.reduce((a, z) => a + z.minutes, 0);
+
   return (
-    <div className="bg-ink-950 border border-ink-800 rounded-xl p-3 space-y-2.5">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <p className="text-xs font-bold text-ink-50">{title}</p>
-        <div className="flex gap-1.5">
-          {SPORT_TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => onSportChange(t.key)}
-              className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
-                activeSport === t.key ? 'text-volt-400 border-volt-500/30 bg-volt-500/10' : 'text-ink-500 border-ink-700 bg-ink-900'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+    <div className="bg-ink-900 border border-ink-800 rounded-2xl p-4 space-y-4 text-ink-100">
+      <div>
+        <span className="text-[10px] font-mono text-volt-400 uppercase tracking-widest block">Analyses</span>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-black text-ink-50 font-display">Performance & progression</h2>
+          <FormSparkline capacity={trend.capacity} />
         </div>
       </div>
 
-      {distribution.countedActivities > 0 ? (
-        <p className="text-[10px] text-ink-500">
-          {distribution.countedActivities} séance(s) Strava · {Math.round(distribution.totalMinutes)} min au total
-        </p>
-      ) : (
-        <p className="text-[10px] text-ink-500">
-          Aucune séance {activeSport === 'bike' ? 'vélo' : 'course'} avec {metric === 'hr' ? 'FC' : 'puissance'} moyenne dans les activités Strava synchronisées.
-        </p>
-      )}
+      <div className="space-y-4">
+        {/* Charge & forme ressenties — basé sur feedbackHistory (réel, daté) */}
+        <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
+          <p className="text-xs font-bold text-ink-50">Charge & forme ressenties</p>
+          <p className="text-[10px] text-ink-500 mb-2">D'après tes validations de séances (pas de capteur externe connecté)</p>
+          {trend.labels.length >= 2 ? (
+            <div className="relative h-56 sm:h-64">
+              <Line data={trendData} options={trendOptions} />
+            </div>
+          ) : (
+            <p className="text-xs text-ink-500 text-center py-8">
+              Valide au moins 2 séances (ressenti dureté/forme) pour voir apparaître ta courbe de charge & forme.
+            </p>
+          )}
+        </div>
 
-      <div className="space-y-2">
-        {distribution.zones.map((z, idx) => (
-          <ZoneRow key={z.zone} zone={z} unit={unit} onMinChange={(v) => updateMin(idx, v)} />
-        ))}
-      </div>
+        {/* Volume prévu (bouton semaine en cours / N+1) et volume réellement effectué
+            (toujours semaine en cours, seule fenêtre où une activité Strava peut exister)
+            côte à côte pour comparer d'un coup d'œil. */}
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap mb-0.5">
+              <p className="text-xs font-bold text-ink-50">Volume prévu</p>
+              {hasNextWeek && (
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => setPlannedWeek('N')}
+                    className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                      plannedWeek === 'N' ? 'text-volt-400 border-volt-500/30 bg-volt-500/10' : 'text-ink-500 border-ink-700 bg-ink-900'
+                    }`}
+                  >
+                    Semaine en cours
+                  </button>
+                  <button
+                    onClick={() => setPlannedWeek('N+1')}
+                    className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                      plannedWeek === 'N+1' ? 'text-volt-400 border-volt-500/30 bg-volt-500/10' : 'text-ink-500 border-ink-700 bg-ink-900'
+                    }`}
+                  >
+                    Semaine N+1
+                  </button>
+                </div>
+              )}
+            </div>
+            <p className="text-[10px] text-ink-500 mb-2">Heures par discipline — {plannedWeek === 'N' ? 'semaine en cours' : 'semaine N+1'}</p>
+            {volume.labels.length > 0 ? (
+              <div className="relative h-56 sm:h-64">
+                <Bar data={plannedSingleWeekData} options={singleWeekOptions} />
+              </div>
+            ) : (
+              <p className="text-xs text-ink-500 text-center py-8">Aucun plan généré pour l'instant.</p>
+            )}
+          </div>
 
-      <div className="flex items-center justify-between pt-0.5">
-        <p className="text-[9px] text-ink-600">
-          Approximation : 1 séance = 1 zone (moyenne de la séance), pas de courbe seconde par seconde.
-        </p>
-        <button onClick={onResetSport} className="text-[9px] font-bold text-ink-500 hover:text-ink-300 shrink-0 ml-2">
-          ↻ Réinitialiser
-        </button>
-      </div>
-    </div>
-  );
-}
+          <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
+            <p className="text-xs font-bold text-ink-50">Volume réalisé</p>
+            <p className="text-[10px] text-ink-500 mb-2">Heures par discipline — semaine en cours (activités Strava)</p>
+            {actualVolume.hasAnyActivityThisWeek && actualVolumeTotal > 0 ? (
+              <div className="relative h-56 sm:h-64">
+                <Bar data={actualSingleWeekData} options={singleWeekOptions} />
+              </div>
+            ) : (
+              <p className="text-xs text-ink-500 text-center py-8">Aucune activité Strava synchronisée pour la semaine en cours.</p>
+            )}
+          </div>
+        </div>
 
-/** Ligne de zone d'allure CAP : même présentation que ZoneRow, mais borne éditée en
- * m:ss/km (converti en vitesse km/h en interne, voir defaultPaceZones dans lib/zones.js)
- * plutôt qu'en valeur brute — un champ number ne permettrait pas de saisir une allure. */
-function PaceZoneRow({ zone, onMinChange }) {
-  const [draft, setDraft] = useState(speedKmhToPaceStr(zone.min));
+        <div className="grid sm:grid-cols-2 gap-4">
+          {/* Distribution des zones — semaine en cours, déduite du champ cardio des séances */}
+          <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
+            <p className="text-xs font-bold text-ink-50">Distribution des zones</p>
+            <p className="text-[10px] text-ink-500 mb-3">Minutes par zone d'intensité — semaine en cours</p>
+            {zonesTotalMinutes > 0 ? (
+              <div className="space-y-2.5">
+                {zones.map((z) => (
+                  <div key={z.zone} className="flex items-center gap-2 text-[11px]">
+                    <span className="w-6 font-bold shrink-0" style={{ color: z.color }}>{z.zone}</span>
+                    <span className="w-[4.5rem] text-ink-400 truncate shrink-0">{z.label}</span>
+                    <div className="flex-1 h-2 rounded-full bg-ink-800 overflow-hidden min-w-[2rem]">
+                      <div className="h-full rounded-full" style={{ width: `${z.pct}%`, backgroundColor: z.color }} />
+                    </div>
+                    <span className="w-12 text-right text-ink-300 font-mono shrink-0">{z.minutes}m</span>
+                    <span className="w-9 text-right font-mono shrink-0" style={{ color: z.color }}>{z.pct}%</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-ink-500 text-center py-8">Pas assez d'info de zone dans le plan actuel.</p>
+            )}
+          </div>
 
-  // Resynchronise le brouillon si la zone change depuis l'extérieur (ex: reset, ou
-  // édition d'une autre zone qui ne nous concerne pas ici — pas de risque d'écraser une
-  // saisie en cours puisque ce composant est ré-instancié par zone via sa key `zone.zone`).
-  useEffect(() => {
-    setDraft(speedKmhToPaceStr(zone.min));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zone.min]);
+          {/* Métriques clés — profil + delta réel vs mesure précédente (healthHistory) */}
+          <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
+            <p className="text-xs font-bold text-ink-50 mb-2">Métriques clés</p>
+            {metrics.length > 0 ? (
+              <div className="divide-y divide-ink-800/80">
+                {metrics.map((m) => (
+                  <div key={m.label} className="flex items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0">
+                    <span className="text-[10px] text-ink-400 leading-tight">{m.label}</span>
+                    <span className="text-right shrink-0">
+                      <span className="text-xs font-bold font-mono text-ink-50">{m.value}</span>
+                      {m.delta && (
+                        <span className={`ml-1.5 text-[9px] font-mono ${m.positive ? 'text-emerald-400' : 'text-ink-500'}`}>{m.delta}</span>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-ink-500 text-center py-8">Renseigne ton profil (VMA, FTP, poids…) pour voir tes métriques clés.</p>
+            )}
+          </div>
+        </div>
 
-  const commit = () => {
-    const speed = paceStrToSpeedKmh(draft);
-    if (speed) {
-      onMinChange(Math.round(speed * 100) / 100);
-    } else {
-      setDraft(speedKmhToPaceStr(zone.min)); // saisie invalide → on revient à la valeur connue
-    }
-  };
-
-  return (
-    <div className="flex items-center gap-2 text-[11px]">
-      <span className="w-6 font-bold shrink-0" style={{ color: zone.color }}>{zone.zone}</span>
-      <span className="w-[4.5rem] text-ink-400 truncate shrink-0">{zone.label}</span>
-      <div className="flex-1 h-2 rounded-full bg-ink-800 overflow-hidden min-w-[1.5rem]">
-        <div className="h-full rounded-full transition-all" style={{ width: `${zone.pct}%`, backgroundColor: zone.color }} />
-      </div>
-      <span className="w-11 text-right text-ink-300 font-mono shrink-0">{zone.minutes}m</span>
-      <span className="w-8 text-right font-mono shrink-0" style={{ color: zone.color }}>{zone.pct}%</span>
-      <span className="flex items-center gap-0.5 shrink-0">
-        <span className="text-[9px] text-ink-600">≥</span>
-        <input
-          type="text"
-          inputMode="numeric"
-          placeholder="m:ss"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-          className="w-12 bg-ink-950 border border-ink-800 rounded px-1 py-0.5 text-[10px] text-ink-100 font-mono text-center"
-        />
-        <span className="text-[9px] text-ink-600">/km</span>
-      </span>
-    </div>
-  );
-}
-
-/** Bloc "Zones Allures CAP" — course à pied uniquement (pas d'onglet vélo/course, l'allure
- * n'a de sens qu'en course à pied ; la natation a sa propre allure CSS gérée ailleurs). */
-function PaceZoneBlock({ zones, onZonesChange, activities, onReset }) {
-  const distribution = computeZoneDistributionFromActivities(activities, zones, { metric: 'pace', sports: RUN_SPORTS });
-
-  const updateMin = (idx, value) => {
-    const nextZones = zones.map((z, i) => (i === idx ? { ...z, min: value } : z));
-    onZonesChange(nextZones);
-  };
-
-  return (
-    <div className="bg-ink-950 border border-ink-800 rounded-xl p-3 space-y-2.5">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <p className="text-xs font-bold text-ink-50">Zones Allures CAP</p>
-      </div>
-
-      {distribution.countedActivities > 0 ? (
-        <p className="text-[10px] text-ink-500">
-          {distribution.countedActivities} séance(s) course · {Math.round(distribution.totalMinutes)} min au total
-        </p>
-      ) : (
-        <p className="text-[10px] text-ink-500">
-          Aucune séance course avec vitesse moyenne dans les activités Strava synchronisées.
-        </p>
-      )}
-
-      <div className="space-y-2">
-        {distribution.zones.map((z, idx) => (
-          <PaceZoneRow key={z.zone} zone={z} onMinChange={(v) => updateMin(idx, v)} />
-        ))}
-      </div>
-
-      <div className="flex items-center justify-between pt-0.5 gap-2">
-        <p className="text-[9px] text-ink-600">
-          Édite librement chaque allure — une fois modifiée, elle prime sur le calcul théorique
-          depuis la VMA pour la génération des séances par le coach IA.
-        </p>
-        <button onClick={onReset} className="text-[9px] font-bold text-ink-500 hover:text-ink-300 shrink-0 ml-2">
-          ↻ Réinitialiser
-        </button>
-      </div>
-    </div>
-  );
-}
-
-export default function ZoneCharts({ profile, activities = [], onPaceZonesChange }) {
-  const [hrZones, setHrZones] = useState(null);
-  const [powerZones, setPowerZones] = useState(null);
-  const [paceZones, setPaceZones] = useState(null);
-  const [hrSport, setHrSport] = useState('bike');
-  const [powerSport, setPowerSport] = useState('bike');
-
-  useEffect(() => {
-    const storedHr = loadFromStorage(STORAGE_KEYS.hrZones, null);
-    setHrZones(
-      storedHr || {
-        bike: defaultHrZones(profile?.fcMax),
-        run: defaultHrZones(profile?.fcMax),
-      }
-    );
-    const storedPower = loadFromStorage(STORAGE_KEYS.powerZones, null);
-    setPowerZones(
-      storedPower || {
-        bike: defaultPowerZones(profile?.ftp),
-        // Pas de FTP course dans le profil : on part d'une estimation ~85% de la FTP
-        // vélo (repère courant capteurs de puissance course type Stryd), 100% éditable.
-        run: defaultPowerZones(profile?.ftp ? profile.ftp * 0.85 : null),
-      }
-    );
-    const storedPace = loadFromStorage(STORAGE_KEYS.paceZones, null);
-    setPaceZones(storedPace || defaultPaceZones(profile?.vma));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const updateHrZones = (next) => {
-    setHrZones(next);
-    saveToStorage(STORAGE_KEYS.hrZones, next);
-  };
-  const updatePowerZones = (next) => {
-    setPowerZones(next);
-    saveToStorage(STORAGE_KEYS.powerZones, next);
-  };
-  const updatePaceZones = (next) => {
-    setPaceZones(next);
-    saveToStorage(STORAGE_KEYS.paceZones, next);
-    onPaceZonesChange?.(next);
-  };
-
-  const resetHrSport = () => {
-    updateHrZones({ ...hrZones, [hrSport]: defaultHrZones(profile?.fcMax) });
-  };
-  const resetPowerSport = () => {
-    const base = powerSport === 'run' && profile?.ftp ? profile.ftp * 0.85 : profile?.ftp;
-    updatePowerZones({ ...powerZones, [powerSport]: defaultPowerZones(base) });
-  };
-  const resetPaceZones = () => updatePaceZones(defaultPaceZones(profile?.vma));
-
-  if (!hrZones || !powerZones || !paceZones) return null;
-
-  return (
-    <div className="grid sm:grid-cols-2 gap-4">
-      <ZoneBlock
-        title="Zones FC"
-        unit="bpm"
-        metric="hr"
-        zonesBySport={hrZones}
-        onZonesBySportChange={updateHrZones}
-        activeSport={hrSport}
-        onSportChange={setHrSport}
-        activities={activities}
-        onResetSport={resetHrSport}
-      />
-      <ZoneBlock
-        title="Zones Puissance"
-        unit="W"
-        metric="power"
-        zonesBySport={powerZones}
-        onZonesBySportChange={updatePowerZones}
-        activeSport={powerSport}
-        onSportChange={setPowerSport}
-        activities={activities}
-        onResetSport={resetPowerSport}
-      />
-      <div className="sm:col-span-2">
-        <PaceZoneBlock
-          zones={paceZones}
-          onZonesChange={updatePaceZones}
-          activities={activities}
-          onReset={resetPaceZones}
-        />
+        {/* Zones FC & Puissance (vélo/course, switch par bouton) — alimentées par les
+            activités Strava synchronisées, bornes éditables manuellement. */}
+        <div>
+          <p className="text-xs font-bold text-ink-50 mb-0.5">Zones d'entraînement</p>
+          <p className="text-[10px] text-ink-500 mb-2">Répartition du temps par zone (séances Strava) · bornes modifiables</p>
+          <ZoneCharts profile={profile || {}} activities={stravaActivities} onPaceZonesChange={onPaceZonesChange} />
+        </div>
       </div>
     </div>
   );
