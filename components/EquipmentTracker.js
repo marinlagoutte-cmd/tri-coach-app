@@ -5,10 +5,26 @@
 // equipment / equipment_components / equipment_component_history dans
 // supabase-schema-equipment.sql), avec possibilité de corriger manuellement.
 //
-// Illustration : vectorielle (dessinée), pas une photo — voir échange avec l'athlète :
-// les photos Canyon/SRAM/DT Swiss (site officiel ou "retouchées à l'IA") restent la
-// propriété de leurs auteurs, jamais intégrées ici. Remplaçable plus tard par de vraies
-// photos personnelles de son vélo (prévu : props photoUrls par zone, voir TODO en bas).
+// Illustration : photos personnelles (prises par l'athlète, fond détouré). Dès qu'un
+// matériel de type "bike" existe, on affiche la vraie photo du vélo à la place du
+// schéma vectoriel. 4 groupes désormais (au lieu de 3) : transmission avant (pédalier/
+// chaîne/pédales), transmission arrière (cassette/dérailleur), roues & freins, cockpit.
+// Cliquer un groupe sur la photo d'ensemble déclenche un zoom (scale + fade centré sur
+// le point cliqué) vers la photo en gros plan de ce groupe, où les points cliquables
+// (Hotspot) ouvrent le suivi de la pièce — logique inchangée par rapport à avant.
+//
+// Fichiers photo attendus dans /public/equipment/canyon-aeroad/ :
+//   overview.jpg, transmission-avant.jpg, transmission-arriere.jpg, roues.jpg, cockpit.jpg
+//
+// Pour ajouter un 2e vélo avec ses propres photos plus tard : dupliquer l'objet PHOTOS
+// ci-dessous dans un dictionnaire { [equipment.name]: {...} } et adapter getPhotoSet()
+// pour matcher sur le nom exact du matériel (actuellement un seul jeu de photos,
+// appliqué à tout matériel de kind === 'bike').
+//
+// NB : deux positions n'ont pas de gros plan dédié sur les photos actuelles — la selle
+// (aucune des photos de gros plan ne la montre) et le pneu arrière (seul l'avant a été
+// pris en photo). Elles retombent sur le centre de leur zone (getPartPos) en attendant
+// une photo dédiée ; ajuste PHOTOS.zones[...].parts si tu en prends une plus tard.
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -29,27 +45,71 @@ const C = {
   badBg: '#FAECE7',
 };
 
-const ZONE_LABELS = { transmission: 'Transmission', roues: 'Roues & freins', cockpit: 'Cockpit' };
-const ZONE_ORDER = ['transmission', 'roues', 'cockpit'];
+const ZONE_LABELS = {
+  'transmission-avant': 'Transmission avant',
+  'transmission-arriere': 'Transmission arrière',
+  roues: 'Roues & freins',
+  cockpit: 'Cockpit',
+};
+const ZONE_ORDER = ['transmission-avant', 'transmission-arriere', 'roues', 'cockpit'];
 
-// Positions des pastilles sur l'illustration vectorielle — vue d'ensemble (%), et par pièce
-// dans chaque zone zoomée. Les `part_key` inconnus (pièce ajoutée manuellement par
-// l'athlète) retombent sur une position par défaut au centre de la zone plutôt que de
-// planter — voir getPartPos.
-const GROUP_PILL_POS = { transmission: { x: 22, y: 82 }, roues: { x: 68, y: 88 }, cockpit: { x: 78, y: 16 } };
-const PART_POS = {
-  transmission: {
-    cassette: { x: 15, y: 58 }, derailleur: { x: 22, y: 90 }, chaine: { x: 48, y: 46 },
-    manivelles: { x: 75, y: 40 }, pedales: { x: 90, y: 55 },
-  },
+// Positions (%) des pastilles/points sur le SCHÉMA VECTORIEL — utilisé seulement en
+// secours si aucune photo n'est disponible pour un matériel (ex. un futur vélo pas
+// encore photographié). Les `part_key` inconnus retombent au centre de la zone.
+const GROUP_PILL_POS_VECTOR = {
+  'transmission-avant': { x: 60, y: 84 },
+  'transmission-arriere': { x: 20, y: 84 },
+  roues: { x: 68, y: 88 },
+  cockpit: { x: 78, y: 16 },
+};
+const PART_POS_VECTOR = {
+  'transmission-avant': { manivelles: { x: 55, y: 55 }, pedales: { x: 78, y: 70 }, chaine: { x: 25, y: 45 } },
+  'transmission-arriere': { cassette: { x: 35, y: 50 }, derailleur: { x: 45, y: 78 } },
   roues: {
     'pneu-ar': { x: 24, y: 20 }, 'pneu-av': { x: 76, y: 20 },
     disques: { x: 50, y: 55 }, plaquettes: { x: 20, y: 40 }, roues: { x: 80, y: 40 },
   },
   cockpit: { cintre: { x: 50, y: 20 }, ruban: { x: 22, y: 55 }, durites: { x: 82, y: 45 }, selle: { x: 50, y: 82 } },
 };
-function getPartPos(zone, partKey) {
-  return PART_POS[zone]?.[partKey] || { x: 50, y: 50 };
+
+// --- Photos personnelles ---------------------------------------------------------------
+
+const PHOTOS = {
+  overview: { src: '/equipment/canyon-aeroad/overview.jpg', ratio: 665 / 520 },
+  pillPos: {
+    'transmission-avant': { x: 39.8, y: 88.7 },
+    'transmission-arriere': { x: 11.3, y: 85.8 },
+    roues: { x: 91.0, y: 62.3 },
+    cockpit: { x: 88.7, y: 35.8 },
+  },
+  zones: {
+    'transmission-avant': {
+      src: '/equipment/canyon-aeroad/transmission-avant.jpg', ratio: 730 / 630,
+      parts: { manivelles: { x: 68.5, y: 50.8 }, pedales: { x: 39.7, y: 93.7 }, chaine: { x: 20.5, y: 41.3 } },
+    },
+    'transmission-arriere': {
+      src: '/equipment/canyon-aeroad/transmission-arriere.jpg', ratio: 1000 / 1233,
+      parts: { cassette: { x: 33.7, y: 38.0 }, derailleur: { x: 38.1, y: 64.6 } },
+    },
+    roues: {
+      src: '/equipment/canyon-aeroad/roues.jpg', ratio: 900 / 1233,
+      parts: { 'pneu-av': { x: 75, y: 30 }, disques: { x: 50, y: 63 }, roues: { x: 85, y: 35 }, plaquettes: { x: 42, y: 68 } },
+    },
+    cockpit: {
+      src: '/equipment/canyon-aeroad/cockpit.jpg', ratio: 1000 / 1333,
+      parts: { cintre: { x: 36.8, y: 48.3 }, ruban: { x: 69.1, y: 65.6 }, durites: { x: 45.1, y: 58.7 } },
+    },
+  },
+};
+
+// Un seul jeu de photos pour l'instant, appliqué à tout matériel de type "bike".
+function getPhotoSet(equipment) {
+  return equipment?.kind === 'bike' ? PHOTOS : null;
+}
+
+function getPartPos(zone, partKey, photoZone) {
+  if (photoZone?.parts?.[partKey]) return photoZone.parts[partKey];
+  return PART_POS_VECTOR[zone]?.[partKey] || { x: 50, y: 50 };
 }
 
 const wearRatio = (km, lifespanKm) => (lifespanKm > 0 ? Math.min(km / lifespanKm, 1) : 0);
@@ -63,7 +123,7 @@ function currentKm(equipment, component) {
   return Math.max(totalKm - (component.baseline_km || 0), 0);
 }
 
-// --- Illustrations vectorielles (reprises de la maquette validée) ------------------------
+// --- Schémas vectoriels (secours si pas de photo) ---------------------------------------
 
 function Defs() {
   return (
@@ -155,19 +215,28 @@ function OverviewArt() {
   );
 }
 
-function TransmissionArt() {
+function TransmissionAvantArt() {
   return (
     <svg viewBox="0 0 400 260" style={{ width: '100%', height: '100%' }}>
       <Defs />
-      <path d="M40,120 L400,60" stroke="url(#eq-frame)" strokeWidth="26" strokeLinecap="round" />
-      <path d="M40,120 L400,60" stroke="url(#eq-frameHi)" strokeWidth="9" strokeLinecap="round" />
-      <Cassette cx={60} cy={150} />
-      <path d="M76,168 L98,205 L86,236" fill="none" stroke="#1B1E23" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
-      <rect x="78" y="222" width="18" height="26" rx="4" fill="#14161C" />
-      <path d="M92,142 L300,95 M90,158 L300,111" stroke="#7C8288" strokeWidth="3.4" strokeDasharray="2 4" />
-      <Crankset cx={300} cy={103} r={46} />
-      <line x1="300" y1="103" x2="345" y2="140" stroke="#1B1E23" strokeWidth="9" strokeLinecap="round" />
-      <rect x="337" y="136" width="26" height="12" rx="3" fill="#1B1E23" transform="rotate(18 350 142)" />
+      <path d="M40,60 L360,150" stroke="url(#eq-frame)" strokeWidth="24" strokeLinecap="round" />
+      <path d="M40,60 L360,150" stroke="url(#eq-frameHi)" strokeWidth="8" strokeLinecap="round" />
+      <path d="M110,90 L340,140" stroke="#7C8288" strokeWidth="3.4" strokeDasharray="2 4" />
+      <Crankset cx={220} cy={140} r={62} />
+      <line x1="220" y1="140" x2="270" y2="182" stroke="#1B1E23" strokeWidth="10" strokeLinecap="round" />
+      <rect x="260" y="176" width="28" height="13" rx="3" fill="#1B1E23" transform="rotate(18 274 182)" />
+    </svg>
+  );
+}
+
+function TransmissionArriereArt() {
+  return (
+    <svg viewBox="0 0 400 260" style={{ width: '100%', height: '100%' }}>
+      <Defs />
+      <path d="M340,20 L200,240" stroke="url(#eq-frame)" strokeWidth="22" strokeLinecap="round" />
+      <Cassette cx={140} cy={130} />
+      <path d="M156,148 L178,190 L166,224" fill="none" stroke="#1B1E23" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="158" y="210" width="18" height="26" rx="4" fill="#14161C" />
     </svg>
   );
 }
@@ -205,7 +274,12 @@ function CockpitArt() {
   );
 }
 
-const ZONE_ART = { transmission: TransmissionArt, roues: WheelsArt, cockpit: CockpitArt };
+const ZONE_ART = {
+  'transmission-avant': TransmissionAvantArt,
+  'transmission-arriere': TransmissionArriereArt,
+  roues: WheelsArt,
+  cockpit: CockpitArt,
+};
 
 // --- UI bits -------------------------------------------------------------------------------
 
@@ -258,6 +332,23 @@ function KmField({ value, onSave }) {
   );
 }
 
+// Conteneur photo/schéma : garde le ratio (aspectRatio) pour que les % de position des
+// pastilles/points restent alignés pixel pour pixel, que ce soit une vraie photo ou le SVG
+// de secours (qui, lui, s'adapte à n'importe quel ratio).
+function MediaFrame({ photo, vectorRatio, children, style }) {
+  const ratio = photo?.ratio || vectorRatio || 600 / 300;
+  return (
+    <div style={{ position: 'relative', background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, overflow: 'hidden', aspectRatio: `${ratio}`, ...style }}>
+      {photo ? (
+        <img src={photo.src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+      ) : null}
+      {children}
+    </div>
+  );
+}
+
+const ZOOM_MS = 320;
+
 export default function EquipmentTracker({ session }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -267,6 +358,12 @@ export default function EquipmentTracker({ session }) {
   const [addingPart, setAddingPart] = useState(false);
   const [newPartName, setNewPartName] = useState('');
   const [newPartLifespan, setNewPartLifespan] = useState(5000);
+
+  // Effet de zoom overview -> zone : on anime le conteneur (scale + fade) centré sur le
+  // point cliqué, puis on bascule la vue une fois l'animation terminée.
+  const [zoomOrigin, setZoomOrigin] = useState(null); // { x, y } en % pendant l'anim
+  const [zooming, setZooming] = useState(false);
+  const [zoneEntering, setZoneEntering] = useState(false); // vrai juste après le montage de la vue zone, pour l'entrée en fondu
 
   const load = useCallback(async () => {
     if (!supabase || !session?.user?.id) { setLoading(false); return; }
@@ -295,6 +392,7 @@ export default function EquipmentTracker({ session }) {
   const shoes = useMemo(() => equipmentList.filter((e) => e.kind === 'shoe'), [equipmentList]);
 
   const activeEquipment = view.equipmentId ? equipmentList.find((e) => e.id === view.equipmentId) : null;
+  const photoSet = getPhotoSet(activeEquipment);
   const zoneComponents = activeEquipment && view.zoneKey
     ? activeEquipment.components.filter((c) => c.zone === view.zoneKey)
     : [];
@@ -304,6 +402,20 @@ export default function EquipmentTracker({ session }) {
     if (comps.length === 0) return wearTone(0);
     return wearTone(Math.max(...comps.map((c) => wearRatio(currentKm(equipment, c), c.lifespan_km))));
   };
+
+  function goToZone(zoneKey, originX, originY) {
+    if (!activeEquipment) return;
+    setZoomOrigin({ x: originX, y: originY });
+    setZooming(true);
+    setTimeout(() => {
+      setView({ level: 'zone', equipmentId: activeEquipment.id, zoneKey, openPart: null });
+      setZooming(false);
+      setZoomOrigin(null);
+      setZoneEntering(true);
+      // Un tick après le montage pour laisser la transition CSS partir de son état initial.
+      requestAnimationFrame(() => requestAnimationFrame(() => setZoneEntering(false)));
+    }, ZOOM_MS);
+  }
 
   async function handleSync() {
     if (!session?.access_token) return;
@@ -433,8 +545,9 @@ export default function EquipmentTracker({ session }) {
     );
   }
 
-  // --- Vue d'ensemble d'un vélo (3 zones) ---
+  // --- Vue d'ensemble d'un vélo (4 zones) ---
   if (view.level === 'overview' && activeEquipment) {
+    const pillPos = photoSet?.pillPos || GROUP_PILL_POS_VECTOR;
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -442,21 +555,30 @@ export default function EquipmentTracker({ session }) {
           <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>{activeEquipment.name}</div>
         </div>
 
-        <div style={{ position: 'relative', background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, height: 260 }}>
-          <OverviewArt />
+        <MediaFrame photo={photoSet?.overview} vectorRatio={600 / 300} style={{
+          transform: zooming ? 'scale(2.6)' : 'scale(1)',
+          transformOrigin: zoomOrigin ? `${zoomOrigin.x}% ${zoomOrigin.y}%` : '50% 50%',
+          opacity: zooming ? 0 : 1,
+          transition: `transform ${ZOOM_MS}ms cubic-bezier(.4,0,.2,1), opacity ${ZOOM_MS}ms ease`,
+        }}>
+          {!photoSet && <OverviewArt />}
           {ZONE_ORDER.map((zoneKey) => {
             const tone = zoneWorstTone(activeEquipment, zoneKey);
-            const pos = GROUP_PILL_POS[zoneKey];
-            return <GroupPill key={zoneKey} x={pos.x} y={pos.y} label={ZONE_LABELS[zoneKey]} tone={tone} onClick={() => setView({ level: 'zone', equipmentId: activeEquipment.id, zoneKey, openPart: null })} />;
+            const pos = pillPos[zoneKey];
+            return (
+              <GroupPill key={zoneKey} x={pos.x} y={pos.y} label={ZONE_LABELS[zoneKey]} tone={tone}
+                onClick={() => goToZone(zoneKey, pos.x, pos.y)} />
+            );
           })}
-        </div>
+        </MediaFrame>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {ZONE_ORDER.map((zoneKey) => {
             const tone = zoneWorstTone(activeEquipment, zoneKey);
             const count = activeEquipment.components.filter((c) => c.zone === zoneKey).length;
+            const pos = pillPos[zoneKey];
             return (
-              <button key={zoneKey} onClick={() => setView({ level: 'zone', equipmentId: activeEquipment.id, zoneKey, openPart: null })}
+              <button key={zoneKey} onClick={() => goToZone(zoneKey, pos.x, pos.y)}
                 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '12px 14px', cursor: 'pointer', textAlign: 'left' }}>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 500, color: C.textPrimary }}>{ZONE_LABELS[zoneKey]}</div>
@@ -474,6 +596,7 @@ export default function EquipmentTracker({ session }) {
   // --- Vue zone (liste de pièces + historique déroulant) ---
   if (view.level === 'zone' && activeEquipment) {
     const ZoneArt = ZONE_ART[view.zoneKey];
+    const photoZone = photoSet?.zones?.[view.zoneKey];
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -481,14 +604,18 @@ export default function EquipmentTracker({ session }) {
           <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>{ZONE_LABELS[view.zoneKey]}</div>
         </div>
 
-        <div style={{ position: 'relative', background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, height: 260 }}>
-          <ZoneArt />
+        <MediaFrame photo={photoZone} vectorRatio={400 / 260} style={{
+          transform: zoneEntering ? 'scale(1.25)' : 'scale(1)',
+          opacity: zoneEntering ? 0 : 1,
+          transition: `transform ${ZOOM_MS}ms cubic-bezier(.4,0,.2,1), opacity ${ZOOM_MS}ms ease`,
+        }}>
+          {!photoZone && ZoneArt && <ZoneArt />}
           {zoneComponents.map((c) => {
             const tone = wearTone(wearRatio(currentKm(activeEquipment, c), c.lifespan_km));
-            const pos = getPartPos(view.zoneKey, c.part_key);
+            const pos = getPartPos(view.zoneKey, c.part_key, photoZone);
             return <Hotspot key={c.id} x={pos.x} y={pos.y} tone={tone} label={c.name} onClick={() => setView((v) => ({ ...v, openPart: v.openPart === c.id ? null : c.id }))} />;
           })}
-        </div>
+        </MediaFrame>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {zoneComponents.map((c) => {
@@ -575,7 +702,3 @@ function ComponentHistory({ componentId }) {
     </div>
   );
 }
-
-// TODO (une fois les photos personnelles envoyées) : remplacer OverviewArt/ZONE_ART par un
-// composant <ZonePhoto src={...} /> recevant l'URL de chaque photo réelle, en gardant les
-// mêmes positions relatives (%) pour les Hotspot/GroupPill — aucun autre changement nécessaire.
