@@ -1,260 +1,176 @@
-import { useEffect, useState } from 'react';
-import { Line, Bar } from 'react-chartjs-2';
+// components/ZoneCharts.js
+//
+// Onglet Profil > "Zones d'entraînement" (rendu depuis PerformanceDashboard.js) :
+// zones d'intensité FC / Puissance / Allure, initialisées depuis le profil
+// (FC max / FTP / VMA, voir lib/zones.js:defaultHrZones/defaultPowerZones/
+// defaultPaceZones) puis 100% éditables manuellement et persistées indépendamment
+// (tri_hr_zones / tri_power_zones / tri_pace_zones, voir lib/storage.js).
+//
+// RECONSTRUCTION (25/08/2026) : le fichier original avait été accidentellement
+// écrasé par une copie de PerformanceDashboard.js (import circulaire ZoneCharts ->
+// ZoneCharts -> ... qui faisait planter l'onglet Profil). Reconstruit à partir des
+// autres fichiers du dépôt (lib/zones.js, lib/storage.js, l'appel dans
+// PerformanceDashboard.js) — pas garanti identique pixel pour pixel à l'original,
+// mais fonctionnellement complet.
+//
+// `paceZones` remonte au parent via `onPaceZonesChange` (voir pages/index.js) car
+// ces zones influencent en direct le sanitize des séances déjà générées ; hrZones/
+// powerZones restent locaux à ce composant (pas de contrepartie côté génération IA
+// immédiate à ce jour).
+import React, { useEffect, useState } from 'react';
+import { Bar } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend } from 'chart.js';
+import { STORAGE_KEYS, loadFromStorage, saveToStorage } from '../lib/storage';
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Tooltip,
-  Legend,
-} from 'chart.js';
-import { STORAGE_KEYS, loadFromStorage } from '../lib/storage';
-import { computeWeeklyDurationByDiscipline, computeActualWeeklyDurationByDiscipline, computeZoneMinutes, computeFeedbackTrendSeries, computeKeyMetrics } from '../lib/analytics';
-import ZoneCharts from './ZoneCharts';
+  BIKE_SPORTS,
+  RUN_SPORTS,
+  defaultHrZones,
+  defaultPowerZones,
+  defaultPaceZones,
+  computeZoneDistributionFromActivities,
+} from '../lib/zones';
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
 const AXIS_COLOR = '#565D67';
 const GRID_COLOR = 'rgba(16, 19, 26, 0.08)';
 
-// Sparkline "forme" compacte dans l'en-tête : lecture en un coup d'œil de la
-// tendance récente (capacity ressentie, données réelles de feedbackHistory —
-// pas de CTL/ATL inventé), le graphe détaillé plus bas restant la vue complète.
-function FormSparkline({ capacity }) {
-  const points = capacity.filter((v) => v !== null && v !== undefined).slice(-8);
-  if (points.length < 2) return null;
-  const w = 72;
-  const h = 24;
-  const min = 0;
-  const max = 10;
-  const stepX = w / (points.length - 1);
-  const coords = points.map((v, i) => `${(i * stepX).toFixed(1)},${(h - ((v - min) / (max - min)) * h).toFixed(1)}`);
-  const last = points[points.length - 1];
-  const first = points[0];
-  const color = last >= first ? '#34D399' : '#FBBF24';
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="shrink-0" title={`Forme ressentie : ${first} → ${last} sur les ${points.length} dernières validations`}>
-      <polyline points={coords.join(' ')} fill="none" stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={coords[coords.length - 1].split(',')[0]} cy={coords[coords.length - 1].split(',')[1]} r="2" fill={color} />
-    </svg>
-  );
+const METRIC_TABS = [
+  { key: 'hr', label: 'FC', unit: 'bpm', sports: [...BIKE_SPORTS, ...RUN_SPORTS] },
+  { key: 'power', label: 'Puissance', unit: 'W', sports: BIKE_SPORTS },
+  { key: 'pace', label: 'Allure', unit: 'km/h', sports: RUN_SPORTS },
+];
+
+// Affichage "allure" (m:ss/km) pour la zone Allure — les zones sont stockées en
+// vitesse (km/h, voir lib/zones.js:defaultPaceZones) pour rester dans la même
+// logique ascendante que les zones FC/Puissance ; la conversion ne se fait qu'ici.
+function speedToPaceLabel(kmh) {
+  if (!Number.isFinite(kmh) || kmh <= 0) return '-';
+  const minPerKm = 60 / kmh;
+  const min = Math.floor(minPerKm);
+  const sec = Math.round((minPerKm - min) * 60);
+  return `${min}:${String(sec).padStart(2, '0')}`;
 }
 
-export default function PerformanceDashboard({ profile, workouts, feedbackHistory, sportType = 'triathlon', stravaActivities = [], onPaceZonesChange }) {
-  const [healthHistory, setHealthHistory] = useState([]);
-  const [plannedWeek, setPlannedWeek] = useState('N');
+function paceLabelToSpeed(label) {
+  const m = String(label || '').match(/(\d+):(\d{1,2})/);
+  if (!m) return null;
+  const minPerKm = Number(m[1]) + Number(m[2]) / 60;
+  if (!(minPerKm > 0)) return null;
+  return Math.round((60 / minPerKm) * 100) / 100;
+}
 
+export default function ZoneCharts({ profile, activities, onPaceZonesChange }) {
+  const [metricTab, setMetricTab] = useState('hr');
+  const [hrZones, setHrZones] = useState(() => defaultHrZones(profile?.fcMax));
+  const [powerZones, setPowerZones] = useState(() => defaultPowerZones(profile?.ftp));
+  const [paceZones, setPaceZones] = useState(() => defaultPaceZones(profile?.vma));
+
+  // Charge les bornes déjà personnalisées (si l'athlète les a éditées avant) —
+  // sinon on garde les valeurs par défaut dérivées du profil calculées ci-dessus.
   useEffect(() => {
-    setHealthHistory(loadFromStorage(STORAGE_KEYS.healthHistory, []));
+    setHrZones(loadFromStorage(STORAGE_KEYS.hrZones, defaultHrZones(profile?.fcMax)));
+    setPowerZones(loadFromStorage(STORAGE_KEYS.powerZones, defaultPowerZones(profile?.ftp)));
+    setPaceZones(loadFromStorage(STORAGE_KEYS.paceZones, defaultPaceZones(profile?.vma)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const volume = computeWeeklyDurationByDiscipline(workouts || {});
-  const actualVolume = computeActualWeeklyDurationByDiscipline(stravaActivities);
-  const zones = computeZoneMinutes(workouts?.N || []);
-  const trend = computeFeedbackTrendSeries(feedbackHistory || []);
-  const metrics = computeKeyMetrics(profile || {}, healthHistory, sportType);
+  const activeTab = METRIC_TABS.find((t) => t.key === metricTab);
+  const activeZones = metricTab === 'hr' ? hrZones : metricTab === 'power' ? powerZones : paceZones;
 
-  // "Semaine en cours" est toujours à l'index 0 (voir tri N avant N+1 dans
-  // computeWeeklyDurationByDiscipline) — le bouton N+1 n'apparaît que si cette semaine
-  // existe réellement en mémoire (workouts['N+1']).
-  const hasNextWeek = volume.labels.length > 1;
-  const plannedWeekIndex = plannedWeek === 'N' ? 0 : 1;
-  const plannedWeekLabel = volume.labels[plannedWeekIndex] || volume.labels[0];
-  const plannedSingleWeekData = {
-    labels: volume.disciplines.map((d) => d.label),
+  const distribution = computeZoneDistributionFromActivities(activities, activeZones, {
+    metric: metricTab,
+    sports: activeTab.sports,
+  });
+
+  function updateZoneMin(zoneKey, rawValue) {
+    const setter = metricTab === 'hr' ? setHrZones : metricTab === 'power' ? setPowerZones : setPaceZones;
+    const storageKey =
+      metricTab === 'hr' ? STORAGE_KEYS.hrZones : metricTab === 'power' ? STORAGE_KEYS.powerZones : STORAGE_KEYS.paceZones;
+    const value = metricTab === 'pace' ? paceLabelToSpeed(rawValue) : Number(rawValue);
+    if (!Number.isFinite(value)) return;
+    setter((prev) => {
+      const next = prev.map((z) => (z.zone === zoneKey ? { ...z, min: value } : z));
+      saveToStorage(storageKey, next);
+      if (metricTab === 'pace' && onPaceZonesChange) onPaceZonesChange(next);
+      return next;
+    });
+  }
+
+  const chartData = {
+    labels: distribution.zones.map((z) => z.zone),
     datasets: [
       {
-        label: plannedWeekLabel,
-        data: volume.disciplines.map((d) => volume.series[d.key]?.[plannedWeekIndex] ?? 0),
-        backgroundColor: volume.disciplines.map((d) => d.color),
+        label: 'Minutes',
+        data: distribution.zones.map((z) => z.minutes),
+        backgroundColor: distribution.zones.map((z) => z.color),
         borderRadius: 6,
-        maxBarThickness: 42,
+        maxBarThickness: 32,
       },
     ],
   };
-  const actualSingleWeekData = {
-    labels: actualVolume.disciplines.map((d) => d.label),
-    datasets: [
-      {
-        label: actualVolume.label,
-        data: actualVolume.disciplines.map((d) => actualVolume.series[d.key] ?? 0),
-        backgroundColor: actualVolume.disciplines.map((d) => d.color),
-        borderRadius: 6,
-        maxBarThickness: 42,
-      },
-    ],
-  };
-  const singleWeekOptions = {
+  const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
-    layout: { padding: { top: 4, right: 8 } },
     plugins: {
       legend: { display: false },
-      tooltip: { titleFont: { size: 12 }, bodyFont: { size: 12 }, callbacks: { label: (ctx) => `${ctx.parsed.y} h` } },
+      tooltip: { titleFont: { size: 12 }, bodyFont: { size: 12 }, callbacks: { label: (ctx) => `${ctx.parsed.y} min` } },
     },
     scales: {
-      y: { beginAtZero: true, ticks: { color: AXIS_COLOR, font: { size: 11 }, callback: (v) => `${v}h` }, grid: { color: GRID_COLOR } },
-      x: { ticks: { color: '#3D434C', font: { size: 12, weight: '600' } }, grid: { display: false } },
+      y: { beginAtZero: true, ticks: { color: AXIS_COLOR, font: { size: 10 } }, grid: { color: GRID_COLOR } },
+      x: { ticks: { color: '#3D434C', font: { size: 11, weight: '600' } }, grid: { display: false } },
     },
   };
-  const actualVolumeTotal = actualVolume.disciplines.reduce((sum, d) => sum + (actualVolume.series[d.key] || 0), 0);
-
-  const trendData = {
-    labels: trend.labels,
-    datasets: [
-      { label: 'Difficulté ressentie /10', data: trend.difficulty, borderColor: '#FB7185', backgroundColor: '#FB7185', tension: 0.3, spanGaps: true, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2.5 },
-      { label: 'Forme ressentie /10', data: trend.capacity, borderColor: '#34D399', backgroundColor: '#34D399', tension: 0.3, spanGaps: true, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2.5 },
-    ],
-  };
-  const trendOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    layout: { padding: { top: 4, right: 8 } },
-    plugins: {
-      legend: { position: 'bottom', labels: { color: '#3D434C', font: { size: 11, weight: '600' }, boxWidth: 10, padding: 12 } },
-      tooltip: { titleFont: { size: 12 }, bodyFont: { size: 12 } },
-    },
-    scales: {
-      y: { min: 0, max: 10, ticks: { color: AXIS_COLOR, stepSize: 2, font: { size: 11 } }, grid: { color: GRID_COLOR } },
-      x: { ticks: { color: AXIS_COLOR, font: { size: 11 } }, grid: { display: false } },
-    },
-  };
-
-  const zonesTotalMinutes = zones.reduce((a, z) => a + z.minutes, 0);
 
   return (
-    <div className="bg-ink-900 border border-ink-800 rounded-2xl p-4 space-y-4 text-ink-100">
-      <div>
-        <span className="text-[10px] font-mono text-volt-400 uppercase tracking-widest block">Analyses</span>
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-black text-ink-50 font-display">Performance & progression</h2>
-          <FormSparkline capacity={trend.capacity} />
-        </div>
+    <div className="bg-ink-950 border border-ink-800 rounded-xl p-3 space-y-3">
+      <div className="grid grid-cols-3 gap-1 bg-ink-900 border border-ink-800 rounded-xl p-1">
+        {METRIC_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setMetricTab(tab.key)}
+            className={`py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
+              metricTab === tab.key ? 'bg-volt-500 text-white' : 'text-ink-400'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      <div className="space-y-4">
-        {/* Charge & forme ressenties — basé sur feedbackHistory (réel, daté) */}
-        <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
-          <p className="text-xs font-bold text-ink-50">Charge & forme ressenties</p>
-          <p className="text-[10px] text-ink-500 mb-2">D'après tes validations de séances (pas de capteur externe connecté)</p>
-          {trend.labels.length >= 2 ? (
-            <div className="relative h-56 sm:h-64">
-              <Line data={trendData} options={trendOptions} />
-            </div>
-          ) : (
-            <p className="text-xs text-ink-500 text-center py-8">
-              Valide au moins 2 séances (ressenti dureté/forme) pour voir apparaître ta courbe de charge & forme.
-            </p>
-          )}
+      {distribution.countedActivities > 0 ? (
+        <div className="relative h-40">
+          <Bar data={chartData} options={chartOptions} />
         </div>
+      ) : (
+        <p className="text-xs text-ink-500 text-center py-6">
+          Pas assez d'activités {activeTab.label.toLowerCase()} synchronisées pour calculer une répartition.
+        </p>
+      )}
 
-        {/* Volume prévu (bouton semaine en cours / N+1) et volume réellement effectué
-            (toujours semaine en cours, seule fenêtre où une activité Strava peut exister)
-            côte à côte pour comparer d'un coup d'œil. */}
-        <div className="grid sm:grid-cols-2 gap-4">
-          <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap mb-0.5">
-              <p className="text-xs font-bold text-ink-50">Volume prévu</p>
-              {hasNextWeek && (
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={() => setPlannedWeek('N')}
-                    className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
-                      plannedWeek === 'N' ? 'text-volt-400 border-volt-500/30 bg-volt-500/10' : 'text-ink-500 border-ink-700 bg-ink-900'
-                    }`}
-                  >
-                    Semaine en cours
-                  </button>
-                  <button
-                    onClick={() => setPlannedWeek('N+1')}
-                    className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
-                      plannedWeek === 'N+1' ? 'text-volt-400 border-volt-500/30 bg-volt-500/10' : 'text-ink-500 border-ink-700 bg-ink-900'
-                    }`}
-                  >
-                    Semaine N+1
-                  </button>
-                </div>
-              )}
-            </div>
-            <p className="text-[10px] text-ink-500 mb-2">Heures par discipline — {plannedWeek === 'N' ? 'semaine en cours' : 'semaine N+1'}</p>
-            {volume.labels.length > 0 ? (
-              <div className="relative h-56 sm:h-64">
-                <Bar data={plannedSingleWeekData} options={singleWeekOptions} />
-              </div>
+      <div className="space-y-1.5">
+        {activeZones.map((z) => (
+          <div key={z.zone} className="flex items-center gap-2 text-[11px]">
+            <span className="w-6 font-bold shrink-0" style={{ color: z.color }}>{z.zone}</span>
+            <span className="flex-1 text-ink-400 truncate">{z.label}</span>
+            {metricTab === 'pace' ? (
+              <input
+                type="text"
+                defaultValue={speedToPaceLabel(z.min)}
+                onBlur={(e) => updateZoneMin(z.zone, e.target.value)}
+                className="w-16 text-right bg-ink-900 border border-ink-800 rounded-lg px-2 py-1 text-ink-100 font-mono text-[11px]"
+              />
             ) : (
-              <p className="text-xs text-ink-500 text-center py-8">Aucun plan généré pour l'instant.</p>
+              <input
+                type="number"
+                defaultValue={z.min}
+                onBlur={(e) => updateZoneMin(z.zone, e.target.value)}
+                className="w-16 text-right bg-ink-900 border border-ink-800 rounded-lg px-2 py-1 text-ink-100 font-mono text-[11px]"
+              />
             )}
+            <span className="w-9 text-ink-500 text-[10px] shrink-0">{metricTab === 'pace' ? '/km' : activeTab.unit}</span>
           </div>
-
-          <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
-            <p className="text-xs font-bold text-ink-50">Volume réalisé</p>
-            <p className="text-[10px] text-ink-500 mb-2">Heures par discipline — semaine en cours (activités Strava)</p>
-            {actualVolume.hasAnyActivityThisWeek && actualVolumeTotal > 0 ? (
-              <div className="relative h-56 sm:h-64">
-                <Bar data={actualSingleWeekData} options={singleWeekOptions} />
-              </div>
-            ) : (
-              <p className="text-xs text-ink-500 text-center py-8">Aucune activité Strava synchronisée pour la semaine en cours.</p>
-            )}
-          </div>
-        </div>
-
-        <div className="grid sm:grid-cols-2 gap-4">
-          {/* Distribution des zones — semaine en cours, déduite du champ cardio des séances */}
-          <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
-            <p className="text-xs font-bold text-ink-50">Distribution des zones</p>
-            <p className="text-[10px] text-ink-500 mb-3">Minutes par zone d'intensité — semaine en cours</p>
-            {zonesTotalMinutes > 0 ? (
-              <div className="space-y-2.5">
-                {zones.map((z) => (
-                  <div key={z.zone} className="flex items-center gap-2 text-[11px]">
-                    <span className="w-6 font-bold shrink-0" style={{ color: z.color }}>{z.zone}</span>
-                    <span className="w-[4.5rem] text-ink-400 truncate shrink-0">{z.label}</span>
-                    <div className="flex-1 h-2 rounded-full bg-ink-800 overflow-hidden min-w-[2rem]">
-                      <div className="h-full rounded-full" style={{ width: `${z.pct}%`, backgroundColor: z.color }} />
-                    </div>
-                    <span className="w-12 text-right text-ink-300 font-mono shrink-0">{z.minutes}m</span>
-                    <span className="w-9 text-right font-mono shrink-0" style={{ color: z.color }}>{z.pct}%</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-ink-500 text-center py-8">Pas assez d'info de zone dans le plan actuel.</p>
-            )}
-          </div>
-
-          {/* Métriques clés — profil + delta réel vs mesure précédente (healthHistory) */}
-          <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
-            <p className="text-xs font-bold text-ink-50 mb-2">Métriques clés</p>
-            {metrics.length > 0 ? (
-              <div className="divide-y divide-ink-800/80">
-                {metrics.map((m) => (
-                  <div key={m.label} className="flex items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0">
-                    <span className="text-[10px] text-ink-400 leading-tight">{m.label}</span>
-                    <span className="text-right shrink-0">
-                      <span className="text-xs font-bold font-mono text-ink-50">{m.value}</span>
-                      {m.delta && (
-                        <span className={`ml-1.5 text-[9px] font-mono ${m.positive ? 'text-emerald-400' : 'text-ink-500'}`}>{m.delta}</span>
-                      )}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-ink-500 text-center py-8">Renseigne ton profil (VMA, FTP, poids…) pour voir tes métriques clés.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Zones FC & Puissance (vélo/course, switch par bouton) — alimentées par les
-            activités Strava synchronisées, bornes éditables manuellement. */}
-        <div>
-          <p className="text-xs font-bold text-ink-50 mb-0.5">Zones d'entraînement</p>
-          <p className="text-[10px] text-ink-500 mb-2">Répartition du temps par zone (séances Strava) · bornes modifiables</p>
-          <ZoneCharts profile={profile || {}} activities={stravaActivities} onPaceZonesChange={onPaceZonesChange} />
-        </div>
+        ))}
       </div>
     </div>
   );
