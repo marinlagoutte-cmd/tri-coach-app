@@ -80,7 +80,7 @@ const PHOTOS = {
   // marge blanche ajoutée tout autour pour "dézoomer" (le vélo occupait tout le cadre
   // avant). Si tu remplaces cette photo, garde le même traitement ou recalcule `ratio`
   // et les % de pillPos ci-dessous en conséquence.
-  overview: { src: '/equipment/canyon-aeroad/overview.jpg', ratio: 905 / 708 },
+  overview: { src: '/equipment/canyon-aeroad/overview-1.jpg', ratio: 905 / 708 },
   pillPos: {
     'transmission-avant': { x: 42.5, y: 78.4 },
     'transmission-arriere': { x: 21.6, y: 76.3 },
