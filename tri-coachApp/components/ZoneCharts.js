@@ -36,9 +36,13 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 const AXIS_COLOR = '#565D67';
 const GRID_COLOR = 'rgba(16, 19, 26, 0.08)';
 
+// FC et Puissance s'appliquent aux deux disciplines (vélo ET course, ex: capteur de
+// puissance Stryd en course à pied) — seule l'Allure (vitesse/pace) est spécifique à la
+// course à pied, le vélo utilisant la Puissance comme équivalent (pas de zone de vitesse
+// vélo distincte, ce serait redondant avec la Puissance pour cette discipline).
 const METRIC_TABS = [
   { key: 'hr', label: 'FC', unit: 'bpm', sports: [...BIKE_SPORTS, ...RUN_SPORTS] },
-  { key: 'power', label: 'Puissance', unit: 'W', sports: BIKE_SPORTS },
+  { key: 'power', label: 'Puissance', unit: 'W', sports: [...BIKE_SPORTS, ...RUN_SPORTS] },
   { key: 'pace', label: 'Allure', unit: 'km/h', sports: RUN_SPORTS },
 ];
 
@@ -69,6 +73,17 @@ export default function ZoneCharts({ profile, activities, onPaceZonesChange }) {
 
   // Charge les bornes déjà personnalisées (si l'athlète les a éditées avant) —
   // sinon on garde les valeurs par défaut dérivées du profil calculées ci-dessus.
+  // BUG RÉEL CORRIGÉ : cet effet ne dépendait auparavant que de `[]` (exécuté une seule
+  // fois au montage). Or `profile` est chargé de façon ASYNCHRONE depuis le localStorage
+  // par le composant parent (voir pages/index.js, useEffect "CHARGEMENT INITIAL") : si
+  // l'onglet Profil est déjà affiché au chargement de la page, ZoneCharts se montait
+  // AVANT la fin de cette hydratation, avec `profile` encore à sa valeur par défaut
+  // (fcMax/ftp/vma = null) — les zones par défaut calculées (repli 190 bpm / 200 W / 14
+  // km/h) restaient alors figées indéfiniment, même une fois le vrai profil chargé, tant
+  // que la page n'était pas rechargée. On dépend maintenant des vraies valeurs du profil
+  // pour que l'effet se ré-exécute dès qu'elles arrivent (sans risque d'écraser une
+  // édition manuelle : `loadFromStorage` continue de prioriser le localStorage sur la
+  // valeur par défaut recalculée).
   useEffect(() => {
     setHrZones(loadFromStorage(STORAGE_KEYS.hrZones, defaultHrZones(profile?.fcMax)));
     setPowerZones(loadFromStorage(STORAGE_KEYS.powerZones, defaultPowerZones(profile?.ftp)));
@@ -86,8 +101,7 @@ export default function ZoneCharts({ profile, activities, onPaceZonesChange }) {
       setPaceZones(fallbackPaceZones);
       saveToStorage(STORAGE_KEYS.paceZones, fallbackPaceZones);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [profile?.fcMax, profile?.ftp, profile?.vma]);
 
   const activeTab = METRIC_TABS.find((t) => t.key === metricTab);
   const activeZones = metricTab === 'hr' ? hrZones : metricTab === 'power' ? powerZones : paceZones;
