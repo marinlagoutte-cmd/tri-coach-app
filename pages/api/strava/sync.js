@@ -122,6 +122,15 @@ export default async function handler(req, res) {
       if (pageData.length < PER_PAGE) break; // dernière page atteinte
     }
 
+    // Diagnostic temporaire (26/08) : à retirer une fois le blocage résolu.
+    console.log('[api/strava/sync] fenêtre :', {
+      currentWeekStart, previousWeekStart,
+      currentWeekStartISO: new Date(currentWeekStart * 1000).toISOString(),
+      previousWeekStartISO: new Date(previousWeekStart * 1000).toISOString(),
+    });
+    console.log('[api/strava/sync] activités reçues de Strava :', allActivities.length,
+      allActivities.slice(0, 5).map((a) => ({ id: a.id, name: a.name, start_date: a.start_date })));
+
     // GARDE-FOU VOLUME (voir commentaire d'en-tête) : si même sur 2 semaines le volume est
     // anormalement élevé, on se recentre sur la seule semaine en cours plutôt que de tout
     // importer d'un coup — `raw.start_date` (horodatage UTC réel Strava) comparé à
@@ -150,6 +159,7 @@ export default async function handler(req, res) {
       (existingRows || []).forEach((r) => existingIds.add(r.id));
     }
     const missingActivities = allActivities.filter((a) => !existingIds.has(a.id));
+    console.log('[api/strava/sync] déjà connues :', existingIds.size, '/ nouvelles :', missingActivities.length);
 
     if (missingActivities.length === 0) {
       return res.status(200).json({ imported: 0, skipped: allActivities.length, totalFetched: allActivities.length, limitedToCurrentWeek });
