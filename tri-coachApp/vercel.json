@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "pages/api/strava/webhook.js": {
+      "maxDuration": 60
+    },
+    "pages/api/strava/sync.js": {
+      "maxDuration": 60
+    }
+  }
+}
