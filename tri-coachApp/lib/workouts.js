@@ -187,8 +187,28 @@ export function enrichWorkoutMetrics(workout, profile) {
     // l'exclut donc explicitement de "déjà valide" pour forcer sa recomputation à chaque appel
     // de sanitizeWorkout, quelle que soit l'allure déjà présente. Les autres zones (Z3-Z5,
     // fractionné) restent inchangées : leur allure reste celle choisie par l'IA une fois générée.
+    // CORRECTIF (le champ effortZone seul ne suffit pas) : `effortZone`/`cardio` sont
+    // demandés à l'IA dans le prompt (RÈGLE : "RUN : effortZone = zone d'effort"), mais
+    // ni l'un ni l'autre n'est vérifié par la boucle de complétion (voir
+    // getIncompleteWorkouts plus bas, qui ne contrôle que `intensity`/`duration`) — en
+    // pratique, `effortZone` est très souvent absent du JSON renvoyé, ce qui désactivait
+    // silencieusement `isContinuousEfZone2` (toujours `false` faute de valeur à lire) et
+    // laissait donc le bug initial intact malgré la correction ci-dessus. On élargit donc
+    // la détection à TOUT texte librement rédigé par l'IA pour cette séance — title, desc,
+    // ET structure (ce dernier est un champ OBLIGATOIRE, "résumé en une phrase", voir
+    // lib/gemini.js RÈGLE ABSOLUE N°2 : "Tous : structure = résumé en UNE SEULE phrase
+    // courte" — donc bien plus fiable qu'effortZone qui n'est jamais vérifié) — et on ne
+    // se limite plus à la phrase exacte "endurance fondamentale"/"EF" : une simple mention
+    // isolée de la zone "Z2" dans ce texte suffit désormais (ex: structure "allure Z2
+    // stable"), pour ne jamais dépendre d'une formulation précise que l'IA ne garantit pas
+    // mot pour mot d'une génération à l'autre.
     const rawEffortZone = String(effortZone || '').trim().toUpperCase();
-    const isContinuousEfZone2 = !isInterval && /^Z2\b/.test(rawEffortZone);
+    const rawCardio = String(cardio || '').trim().toUpperCase();
+    const freeText = `${workout.title || ''} ${workout.desc || ''} ${workout.structure || ''}`;
+    const mentionsZ2Field = /\bZ2\b/.test(rawEffortZone) || /\bZ2\b/.test(rawCardio);
+    const mentionsZ2Text = /\bZ2\b/i.test(freeText);
+    const mentionsEfFondamentale = /endurance\s+fondamentale|\bEF\b/i.test(freeText);
+    const isContinuousEfZone2 = !isInterval && (mentionsZ2Field || mentionsZ2Text || mentionsEfFondamentale);
     const hasValidPace = !alreadyRpeBased
       && !isOwnFallbackPace
       && !isContinuousEfZone2
