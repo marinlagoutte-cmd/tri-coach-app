@@ -173,8 +173,25 @@ export function enrichWorkoutMetrics(workout, profile) {
     // de repli — dans ce cas elle est TOUJOURS recalculée depuis les zones/VMA
     // actuelles, jamais figée après son premier calcul.
     const isOwnFallbackPace = /\(EF, zones calibr[ée]es\)|\(75% VMA\)/i.test(String(intensity || ''));
+    // BUG RÉEL CORRIGÉ (allure Z2 ne se met jamais à jour depuis le Profil) : les deux
+    // garde-fous ci-dessus (`alreadyRpeBased`/`isOwnFallbackPace`) ne rattrapaient QUE les
+    // séances déjà passées par ce repli déterministe. Mais pour une séance CAP continue en
+    // endurance fondamentale (Z2), l'IA fournit ELLE-MÊME une allure déjà bien formée dès la
+    // génération (ex: "5:10 /km", RÈGLE ABSOLUE N°1 du prompt) — sans notre marqueur de repli.
+    // `hasValidPace` jugeait alors cette allure "déjà valide" pour toujours : une fois générée,
+    // AUCUNE correction ultérieure de la zone Z2 dans l'onglet Profil (voir ZoneCharts.js /
+    // pages/index.js:handlePaceZonesChange, qui rappelle bien sanitizeWorkout) ne la recalculait
+    // jamais, quelle que soit la nouvelle saisie manuelle — exactement le bug signalé par
+    // l'athlète. Pour CE type de séance précis (continue, zone Z2), l'allure calibrée
+    // manuellement doit toujours l'emporter sur celle choisie par l'IA à la génération : on
+    // l'exclut donc explicitement de "déjà valide" pour forcer sa recomputation à chaque appel
+    // de sanitizeWorkout, quelle que soit l'allure déjà présente. Les autres zones (Z3-Z5,
+    // fractionné) restent inchangées : leur allure reste celle choisie par l'IA une fois générée.
+    const rawEffortZone = String(effortZone || '').trim().toUpperCase();
+    const isContinuousEfZone2 = !isInterval && /^Z2\b/.test(rawEffortZone);
     const hasValidPace = !alreadyRpeBased
       && !isOwnFallbackPace
+      && !isContinuousEfZone2
       && efSpeed
       && /\d+:\d{2}\s*\/?\s*(min\/)?km/i.test(String(intensity || ''));
     if (!efSpeed && !alreadyRpeBased) {
