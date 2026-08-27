@@ -1,5 +1,6 @@
 // lib/workouts.js
 import { DAYS_OF_WEEK } from './defaults';
+import { zoneForValue, defaultPaceZones } from './zones';
 
 export function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
@@ -214,6 +215,11 @@ export function enrichWorkoutMetrics(workout, profile) {
       && !isContinuousEfZone2
       && efSpeed
       && /\d+:\d{2}\s*\/?\s*(min\/)?km/i.test(String(intensity || ''));
+    // Vitesse (km/h) réellement retenue pour CETTE séance une fois `intensity` fixée
+    // ci-dessous — sert de base commune à `effortZone` (voir plus bas) pour que le
+    // libellé de zone affiché corresponde TOUJOURS à l'allure réellement affichée,
+    // plutôt que d'être calculé/hérité séparément et pouvoir diverger.
+    let usedSpeedKmh = null;
     if (!efSpeed && !alreadyRpeBased) {
       intensity = 'Allure selon ressenti (RPE 6/10) — VMA non renseignée';
     } else if (!hasValidPace) {
@@ -222,6 +228,7 @@ export function enrichWorkoutMetrics(workout, profile) {
         // L'IA a donné une vitesse en km/h : on la CONVERTIT en min/km au lieu de la
         // jeter, pour préserver l'allure réellement voulue par l'IA pour cette séance.
         const speedKmh = Number(kmhMatch[1].replace(',', '.'));
+        usedSpeedKmh = speedKmh;
         const paceMin = 60 / speedKmh;
         const min = Math.floor(paceMin);
         const sec = Math.round((paceMin - min) * 60);
@@ -229,6 +236,7 @@ export function enrichWorkoutMetrics(workout, profile) {
       } else if (efSpeed) {
         // Repli sur les zones calibrées manuellement si disponibles, sinon 75% VMA —
         // jamais une constante générique (voir fallbackEfSpeedKmh ci-dessus).
+        usedSpeedKmh = efSpeed;
         const paceMin = 60 / efSpeed;
         const min = Math.floor(paceMin);
         const sec = Math.round((paceMin - min) * 60);
@@ -241,6 +249,27 @@ export function enrichWorkoutMetrics(workout, profile) {
       }
     }
     cadence = cadence || '175-180 spm';
+    // BUG RÉEL CORRIGÉ (signalé par l'athlète, capture Réglages > Zones d'entraînement) :
+    // `effortZone` n'était mis à jour QUE s'il était absent (`effortZone || 'Z2-Z3'`),
+    // jamais recalculé — contrairement à `intensity` juste au-dessus, qui, pour une
+    // séance continue en EF/Z2 (isContinuousEfZone2), est TOUJOURS recalculée depuis les
+    // zones d'allure calibrées manuellement par l'athlète. Conséquence concrète (le bug
+    // signalé) : après une correction des bornes Z2/Z3 dans l'onglet Profil, l'allure
+    // affichée changeait bien (ex: 4:13 /km), mais le libellé "ZONE D'EFFORT" restait
+    // figé sur l'ancienne valeur ("Z2-Z3") — les deux pouvaient donc afficher des choses
+    // incohérentes entre elles (une allure de fait en Z3 étiquetée "Z2-Z3"). On recalcule
+    // donc ici `effortZone`, pour ce même type de séance et UNIQUEMENT quand on dispose
+    // d'une vitesse numérique réellement utilisée (`usedSpeedKmh` — jamais en repli RPE,
+    // où aucune zone chiffrée n'a de sens), à partir des mêmes zones que celles qui ont
+    // servi à calculer `intensity` juste au-dessus (zones calibrées si valides, sinon
+    // zones théoriques dérivées de la VMA) — jamais une zone inventée ou recopiée de l'IA.
+    if (isContinuousEfZone2 && Number.isFinite(usedSpeedKmh)) {
+      const lookupZones = hasValidPaceZones(profile?.paceZones)
+        ? [...profile.paceZones].sort((a, b) => Number(a.min) - Number(b.min))
+        : (profile?.vma ? defaultPaceZones(profile.vma) : null);
+      const matchedZone = lookupZones ? zoneForValue(lookupZones, usedSpeedKmh) : null;
+      if (matchedZone) effortZone = matchedZone.zone;
+    }
     effortZone = effortZone || 'Z2-Z3';
     avgBpm = (profile?.fcMax && profile?.fcRepos) ? (avgBpm || `${Math.round(fcRepos + (fcMax - fcRepos) * 0.65)} bpm`) : (avgBpm || null);
     cardio = cardio || (avgBpm ? `${effortZone} (${avgBpm})` : effortZone);
