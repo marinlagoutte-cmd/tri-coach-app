@@ -5,8 +5,8 @@
   "scripts": {
     "predev": "node scripts/generate-sw.js",
     "prebuild": "node scripts/generate-sw.js",
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "find . -name '._*' -delete && rm -rf __MACOSX && next dev",
+    "build": "find . -name '._*' -delete && rm -rf __MACOSX && next build",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest"
