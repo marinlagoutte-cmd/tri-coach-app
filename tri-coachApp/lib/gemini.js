@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { callGroqJSON, callGroqText } from './groq';
 import { DAYS_OF_WEEK } from './defaults';
-import { getIncompleteWorkouts, sanitizeWorkout, checkSessionCountCoherence, enforceSessionCount, mergeWeekFix, ensureAllDaysPresent, dedupeIdenticalSameDaySessions, rebalanceSameDisciplineDoubles, enforceMaxSessionsPerDay, enforceThirdSessionLowIntensity, enforceBeginnerProgression, enforceNoConsecutiveHardDays, enforceDoubleThresholdEligibility, enforceTaperVolume, applyFatigueAutoRegulation, checkWeeklyVolumeWarning, checkWeekSimilarityWarning, checkMonotonyWarning, checkPolarizationWarning, checkTrailElevationWarning, injectPhysioTestSessions, enforceSwimVolumeFloor, enforceLongSessionFloor, applyBeginnerFirstPlanRamp, applyEasierTrendProgression } from './workouts';
+import { getIncompleteWorkouts, sanitizeWorkout, checkSessionCountCoherence, enforceSessionCount, mergeWeekFix, ensureAllDaysPresent, dedupeIdenticalSameDaySessions, rebalanceSameDisciplineDoubles, enforceMaxSessionsPerDay, enforceSessionSpread, isTripleDayEligible, enforceThirdSessionLowIntensity, enforceBeginnerProgression, enforceNoConsecutiveHardDays, enforceDoubleThresholdEligibility, enforceTaperVolume, applyFatigueAutoRegulation, checkWeeklyVolumeWarning, checkWeekSimilarityWarning, checkMonotonyWarning, checkPolarizationWarning, checkTrailElevationWarning, injectPhysioTestSessions, enforceSwimVolumeFloor, enforceLongSessionFloor, applyBeginnerFirstPlanRamp, applyEasierTrendProgression } from './workouts';
 import { resolveAthletePhysiology, applyFeedbackTrendToPhysiology, resolveTargetPhysiology } from './physiology';
 import { summarizeFeedbackTrend, summarizeHrvTrend } from './feedback';
 import { buildPeriodizationPlan, describePhaseGuidance, formatMacrocyclesForPrompt, phasesToCycles, getProgressionFactor, interpolateTowardTarget, summarizeUpcomingRaces } from './periodization';
@@ -489,15 +489,25 @@ function buildEnduranceExpertRules({ fitnessLevel, trainingExperience, sportType
   const advancedOk = level >= 4 && expRank >= 4 && Number(hoursPerWeek) >= 8;
 
   // Garde-fou déterministe correspondant : enforceMaxSessionsPerDay (workouts.js) autorise 3
-  // séances/jour uniquement dans ce cas, et enforceThirdSessionLowIntensity force la 3e séance
-  // en peu intensive si l'IA ne l'a pas déjà fait — cette règle de prompt est donc la première
-  // ligne, pas la seule, mais mieux vaut que l'IA le fasse bien du premier coup.
-  const tripleDayRule = Number(maxSessionsPerWeek) > 12
-    ? `- TRIPLE SÉANCE AUTORISÉE (volume visé >12 séances/semaine) : tu PEUX programmer 3 séances le même
-  jour à condition que ce soit 3 SPORTS DIFFÉRENTS (jamais 2x la même discipline) ET que la 3e séance
-  de la journée soit OBLIGATOIREMENT peu intensive (endurance fondamentale Z1-Z2 ou technique, jamais
-  seuil/VMA/fractionné) — c'est la contrepartie non négociable d'une triple journée.`
-    : '- Pas de triple séance dans la même journée pour ce volume (≤12 séances/semaine visées) : 2 séances/jour maximum (1 si brick).';
+  // séances/jour uniquement dans ce cas — EXACTEMENT la même condition (isTripleDayEligible,
+  // partagée entre les deux fichiers pour ne jamais désynchroniser prompt et garde-fou) —, et
+  // enforceThirdSessionLowIntensity force la 3e séance en peu intensive si l'IA ne l'a pas déjà
+  // fait — cette règle de prompt est donc la première ligne, pas la seule, mais mieux vaut que
+  // l'IA le fasse bien du premier coup. Demande explicite de l'athlète : le volume seul
+  // (>12 séances/semaine) ne suffit plus à autoriser une triple journée, il faut EN PLUS un
+  // profil expérience confirmée/expert ET un volume horaire réellement élevé (≥12h/sem) —
+  // sinon le total demandé au questionnaire retombera légèrement en dessous plutôt que de
+  // forcer une triple journée sur un profil qui n'est pas prêt à l'encaisser.
+  const tripleDayEligible = Number(maxSessionsPerWeek) > 12 && isTripleDayEligible(fitnessLevel, hoursPerWeek, trainingExperience);
+  const tripleDayRule = tripleDayEligible
+    ? `- TRIPLE SÉANCE AUTORISÉE (volume visé >12 séances/semaine + profil confirmé/expert + volume
+  ≥12h/sem) : tu PEUX programmer 3 séances le même jour à condition que ce soit 3 SPORTS DIFFÉRENTS
+  (jamais 2x la même discipline) ET que la 3e séance de la journée soit OBLIGATOIREMENT peu intensive
+  (endurance fondamentale Z1-Z2 ou technique, jamais seuil/VMA/fractionné) — c'est la contrepartie non
+  négociable d'une triple journée.`
+    : `- Pas de triple séance dans la même journée pour ce profil/volume : 2 séances/jour maximum
+  (1 si brick), même si le questionnaire demande plus de 12 séances/semaine — une triple journée
+  nécessite en plus une expérience confirmée/expert et un volume ≥12h/sem.`;
 
   const doubleThresholdRule = advancedOk
     ? `- DOUBLE SEUIL AUTORISÉ (forme confirmée + expérience confirmée/expert + volume ≥8h/sem) : tu PEUX
@@ -1281,7 +1291,18 @@ Réponds UNIQUEMENT avec les séances corrigées (tu peux ne renvoyer QUE les jo
     // rebalance ci-dessus au cas où le déplacement recréerait un doublon de discipline sur
     // le jour de destination. Enfin, sur les journées à triple séance ainsi conservées, on
     // force la 3e séance (la plus courte) en peu intensive — règle explicite de l'athlète.
-    sanitized[weekKey] = enforceMaxSessionsPerDay(sanitized[weekKey], wizardData.offDays, wizardData.sportType, wizardData.maxSessionsPerWeek);
+    sanitized[weekKey] = enforceMaxSessionsPerDay(sanitized[weekKey], wizardData.offDays, wizardData.sportType, wizardData.maxSessionsPerWeek, {
+      fitnessLevel: wizardData.fitnessLevel,
+      hoursPerWeek: wizardData.hoursPerWeek,
+      trainingExperience: wizardData.trainingExperience,
+    });
+    sanitized[weekKey] = rebalanceSameDisciplineDoubles(sanitized[weekKey], wizardData.sportType, wizardData.offDays, wizardData.maxSessionsPerWeek);
+    // Demande explicite de l'athlète (semaine 36 réelle : mardi=3 séances, vendredi=1) : même
+    // quand chaque jour respecte individuellement son plafond, rien n'empêchait un déséquilibre
+    // flagrant entre jours. On lisse à un écart max de 1 séance entre le jour le plus et le moins
+    // chargé de la semaine, puis on revérifie le doublon de discipline (un déplacement peut en
+    // recréer un sur le jour de destination).
+    sanitized[weekKey] = enforceSessionSpread(sanitized[weekKey], wizardData.offDays);
     sanitized[weekKey] = rebalanceSameDisciplineDoubles(sanitized[weekKey], wizardData.sportType, wizardData.offDays, wizardData.maxSessionsPerWeek);
     sanitized[weekKey] = enforceThirdSessionLowIntensity(sanitized[weekKey]);
     // Filet de sécurité INDÉPENDANT du nombre total de séances : même quand le total
@@ -1583,7 +1604,15 @@ Réponds UNIQUEMENT avec les séances corrigées (tu peux ne renvoyer QUE les jo
     target = enforceSessionCount(target, wizardData.maxSessionsPerWeek, wizardData.offDays, profileForSanitize, wizardData.sportType);
   }
   target = rebalanceSameDisciplineDoubles(target, wizardData.sportType, wizardData.offDays, wizardData.maxSessionsPerWeek);
-  target = enforceMaxSessionsPerDay(target, wizardData.offDays, wizardData.sportType, wizardData.maxSessionsPerWeek);
+  target = enforceMaxSessionsPerDay(target, wizardData.offDays, wizardData.sportType, wizardData.maxSessionsPerWeek, {
+    fitnessLevel: wizardData.fitnessLevel,
+    hoursPerWeek: wizardData.hoursPerWeek,
+    trainingExperience: wizardData.trainingExperience,
+  });
+  target = rebalanceSameDisciplineDoubles(target, wizardData.sportType, wizardData.offDays, wizardData.maxSessionsPerWeek);
+  // Même lissage de répartition que generatePlanWithAI (voir plus haut) : évite qu'une
+  // semaine RÉGÉNÉRÉE seule retombe dans le même déséquilibre jour-à-3 / jour-à-1.
+  target = enforceSessionSpread(target, wizardData.offDays);
   target = rebalanceSameDisciplineDoubles(target, wizardData.sportType, wizardData.offDays, wizardData.maxSessionsPerWeek);
   target = enforceThirdSessionLowIntensity(target);
   target = dedupeIdenticalSameDaySessions(target).map((w) => sanitizeWorkout(w, profileForSanitize));
