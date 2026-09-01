@@ -1,5 +1,5 @@
 import { coChatWithCoach } from '../../lib/coGeneration';
-import { mergeWorkoutPatches, checkSessionCountCoherence, rebalanceSameDisciplineDoubles, enforceMaxSessionsPerDay, enforceThirdSessionLowIntensity, dedupeIdenticalSameDaySessions, sanitizeWorkout } from '../../lib/workouts';
+import { mergeWorkoutPatches, checkSessionCountCoherence, rebalanceSameDisciplineDoubles, enforceMaxSessionsPerDay, enforceSessionSpread, enforceThirdSessionLowIntensity, dedupeIdenticalSameDaySessions, sanitizeWorkout } from '../../lib/workouts';
 import { checkRateLimit, RATE_LIMIT_MESSAGES } from '../../lib/rateLimit';
 
 const ERROR_MESSAGES = {
@@ -82,7 +82,16 @@ export default async function handler(req, res) {
     if (patches?.length) {
       ['N', 'N+1'].forEach((weekKey) => {
         let week = rebalanceSameDisciplineDoubles(updatedWorkouts[weekKey], sportType, constraints?.offDays, constraints?.maxSessionsPerWeek);
-        week = enforceMaxSessionsPerDay(week, constraints?.offDays, sportType, constraints?.maxSessionsPerWeek);
+        week = enforceMaxSessionsPerDay(week, constraints?.offDays, sportType, constraints?.maxSessionsPerWeek, {
+          fitnessLevel: constraints?.fitnessLevel,
+          hoursPerWeek: constraints?.hoursPerWeek,
+          trainingExperience: constraints?.trainingExperience,
+        });
+        week = rebalanceSameDisciplineDoubles(week, sportType, constraints?.offDays, constraints?.maxSessionsPerWeek);
+        // Même lissage de répartition que la génération de plan (voir lib/gemini.js) : un
+        // simple patch de chat ne doit pas non plus pouvoir recréer un déséquilibre flagrant
+        // entre jours (ex: un jour à 3 séances pendant qu'un autre n'en a qu'1).
+        week = enforceSessionSpread(week, constraints?.offDays);
         week = rebalanceSameDisciplineDoubles(week, sportType, constraints?.offDays, constraints?.maxSessionsPerWeek);
         week = enforceThirdSessionLowIntensity(week);
         week = dedupeIdenticalSameDaySessions(week).map((w) => sanitizeWorkout(w, profileForSanitize));
