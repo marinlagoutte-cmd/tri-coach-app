@@ -1203,16 +1203,25 @@ export function rebalanceSameDisciplineDoubles(weekWorkouts, sportType, offDays,
  * séances les plus longues/structurantes du jour d'origine — sans jamais supprimer
  * ni fusionner de séance.
  *
- * EXCEPTION TRIPLE SÉANCE : au-delà de 12 séances/semaine visées (maxSessionsPerWeek), le
- * plafond passe à 3 séances/jour au lieu de 2 — une journée à triple séance n'est pas un
- * problème en soi tant qu'elle mélange 3 sports DIFFÉRENTS (garanti par
- * rebalanceSameDisciplineDoubles, qui déplace tout doublon de discipline avant/après cette
- * fonction) et que la 3e séance reste peu intensive (voir enforceThirdSessionLowIntensity,
- * appliquée juste après dans le pipeline). En dessous de 13 séances/semaine, le plafond reste
- * 2 comme avant : une triple journée n'a pas de raison d'être imposée à un volume qui ne la
- * justifie pas.
+ * EXCEPTION TRIPLE SÉANCE : au-delà de 12 séances/semaine visées (maxSessionsPerWeek) ET
+ * uniquement pour un profil qui peut réellement encaisser une 3e séance le même jour
+ * (voir isTripleDayEligible : expérience confirmée/expert + volume ≥12h/sem), le plafond
+ * passe à 3 séances/jour au lieu de 2 — une journée à triple séance n'est pas un problème en
+ * soi tant qu'elle mélange 3 sports DIFFÉRENTS (garanti par rebalanceSameDisciplineDoubles,
+ * qui déplace tout doublon de discipline avant/après cette fonction) et que la 3e séance
+ * reste peu intensive (voir enforceThirdSessionLowIntensity, appliquée juste après dans le
+ * pipeline). Sans ce niveau de profil, le plafond reste 2 même si le questionnaire demande
+ * plus de 12 séances/semaine — le total demandé retombera alors légèrement en dessous via
+ * enforceSessionCount plutôt que de forcer une triple journée sur un profil qui n'est pas
+ * prêt pour ça (demande explicite de l'athlète, voir aussi buildEnduranceExpertRules dans
+ * lib/gemini.js qui applique exactement la même règle côté prompt IA).
  */
-export function enforceMaxSessionsPerDay(weekWorkouts, offDays, sportType, maxSessionsPerWeek) {
+export function isTripleDayEligible(fitnessLevel, hoursPerWeek, trainingExperience) {
+  const expRank = EXPERIENCE_RANK[trainingExperience] || 3;
+  return (Number(fitnessLevel) || 3) >= 4 && expRank >= 4 && Number(hoursPerWeek) >= 12;
+}
+
+export function enforceMaxSessionsPerDay(weekWorkouts, offDays, sportType, maxSessionsPerWeek, profileFlags = {}) {
   if (!Array.isArray(weekWorkouts) || weekWorkouts.length === 0) return weekWorkouts;
   const list = weekWorkouts.map((w) => ({ ...w }));
   const mandatoryOffDays = String(offDays || '').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
@@ -1220,7 +1229,8 @@ export function enforceMaxSessionsPerDay(weekWorkouts, offDays, sportType, maxSe
 
   const disciplineOf = (w) => classifyDiscipline(w.type);
   const sessionsOn = (day) => list.filter((w) => w.day === day && w.type !== 'REPOS');
-  const allowsTripleDay = Number(maxSessionsPerWeek) > 12;
+  const { fitnessLevel, hoursPerWeek, trainingExperience } = profileFlags;
+  const allowsTripleDay = Number(maxSessionsPerWeek) > 12 && isTripleDayEligible(fitnessLevel, hoursPerWeek, trainingExperience);
   const dayCap = (day) => {
     if (sessionsOn(day).some((w) => disciplineOf(w) === 'ENCHAÎNEMENT')) return 1;
     return allowsTripleDay ? 3 : 2;
@@ -1265,6 +1275,75 @@ export function enforceMaxSessionsPerDay(weekWorkouts, offDays, sportType, maxSe
     if (candidates.length === 0) break; // vraiment aucune destination possible (best effort).
 
     const destDay = candidates[0].day;
+    const idx = list.findIndex((w) => w.id === toMove.id);
+    if (idx === -1) break;
+    const restIdx = list.findIndex((w) => w.day === destDay && w.type === 'REPOS');
+    if (restIdx !== -1) {
+      list[restIdx] = { ...list[idx], day: destDay };
+      list.splice(idx, 1);
+    } else {
+      list[idx] = { ...list[idx], day: destDay };
+    }
+  }
+
+  return list;
+}
+
+/**
+ * RÈGLE ATHLÈTE (retour utilisateur, semaine 36 réelle) : deux jours peuvent chacun
+ * respecter dayCap individuellement (ex: mardi=3 séances si triple-jour éligible, vendredi=1)
+ * sans qu'aucun garde-fou n'égalise pour autant — enforceMaxSessionsPerDay ne corrige QUE les
+ * dépassements de plafond, jamais un déséquilibre entre jours qui restent chacun sous leur
+ * plafond. Ici on impose en plus un écart maximal de 1 séance entre le jour le plus chargé et
+ * le jour le moins chargé de la semaine (hors jour(s) de repos obligatoire(s), qui restent
+ * délibérément à 0 et ne sont jamais concernés par ce lissage). Toujours appliqué APRÈS
+ * enforceMaxSessionsPerDay (donc jamais besoin de re-vérifier dayCap ici : déplacer une séance
+ * du jour le plus chargé vers le jour le moins chargé ne peut jamais faire dépasser le plafond
+ * du jour receveur, puisque son compte de départ est strictement inférieur à celui du donneur).
+ * Un jour d'enchaînement (brick) reste toujours seul sur sa journée : jamais vidé de sa
+ * séance unique, jamais receveur d'une séance supplémentaire.
+ */
+export function enforceSessionSpread(weekWorkouts, offDays) {
+  if (!Array.isArray(weekWorkouts) || weekWorkouts.length === 0) return weekWorkouts;
+  const list = weekWorkouts.map((w) => ({ ...w }));
+  const mandatoryOffDays = String(offDays || '').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
+  const disciplineOf = (w) => classifyDiscipline(w.type);
+  const sessionsOn = (day) => list.filter((w) => w.day === day && w.type !== 'REPOS');
+  const eligibleDays = [...new Set(list.map((w) => w.day))].filter(
+    (day) => !mandatoryOffDays.includes(String(day).toLowerCase())
+  );
+  if (eligibleDays.length < 2) return list;
+
+  let guard = 0;
+  while (guard < 30) {
+    guard += 1;
+    const counts = eligibleDays.map((day) => ({ day, count: sessionsOn(day).length }));
+    const maxEntry = counts.reduce((a, b) => (b.count > a.count ? b : a));
+    const minEntry = counts.reduce((a, b) => (b.count < a.count ? b : a));
+    if (maxEntry.count - minEntry.count <= 1) break; // écart déjà toléré, rien à lisser.
+
+    // Jamais donneur si la seule séance du jour surchargé est un brick (un enchaînement
+    // ne se déplace pas séance par séance, il reste un tout) — on prend alors la plus
+    // courte des séances NON-brick de ce jour, la plus courte étant généralement la moins
+    // structurante (même heuristique que enforceMaxSessionsPerDay/enforceSessionCount).
+    const donorSessions = sessionsOn(maxEntry.day)
+      .filter((w) => disciplineOf(w) !== 'ENCHAÎNEMENT')
+      .sort((a, b) => parseDurationMinutes(a.duration) - parseDurationMinutes(b.duration));
+    const toMove = donorSessions[0];
+    if (!toMove) break; // jour surchargé = uniquement un brick, rien de déplaçable.
+
+    // Jour receveur : parmi les jours au minimum actuel, on préfère celui qui n'a ni brick
+    // ni déjà la même discipline que la séance déplacée (pour ne pas recréer un doublon
+    // que rebalanceSameDisciplineDoubles devrait ensuite défaire) ; à défaut, n'importe quel
+    // jour minimal sans brick.
+    const minCandidates = counts.filter((c) => c.count === minEntry.count).map((c) => c.day);
+    const destTier1 = minCandidates.filter(
+      (day) => !sessionsOn(day).some((w) => disciplineOf(w) === 'ENCHAÎNEMENT' || disciplineOf(w) === disciplineOf(toMove))
+    );
+    const destTier2 = minCandidates.filter((day) => !sessionsOn(day).some((w) => disciplineOf(w) === 'ENCHAÎNEMENT'));
+    const destDay = (destTier1.length ? destTier1 : destTier2)[0];
+    if (!destDay || destDay === maxEntry.day) break; // aucune destination légale : best effort.
+
     const idx = list.findIndex((w) => w.id === toMove.id);
     if (idx === -1) break;
     const restIdx = list.findIndex((w) => w.day === destDay && w.type === 'REPOS');
@@ -1571,11 +1650,20 @@ export function checkPlanCoherence(wizardData) {
   // silencieusement recopié tel quel, menant à des semaines avec des jours à 3-4 séances
   // (violant le cap) ou un total final inférieur à celui demandé (l'algorithme cherchant en
   // vain une case libre) — jamais signalé à l'athlète comme la VRAIE cause du problème.
+  // Demande explicite de l'athlète : le plafond quotidien passe à 3 (au lieu de 2)
+  // uniquement pour un profil expérience confirmée/expert + volume ≥12h/sem (voir
+  // isTripleDayEligible, même condition que enforceMaxSessionsPerDay et le prompt IA
+  // dans lib/gemini.js) — sinon le plafond réel reste 2/jour même si le questionnaire
+  // autorise d'afficher un total plus élevé.
   const offDaysCount = String(wizardData.offDays || '').split(',').map((d) => d.trim()).filter(Boolean).length;
-  const maxFeasibleSessions = 2 * (7 - offDaysCount);
+  const tripleDayOk = isTripleDayEligible(fitnessLevel, hours, wizardData.trainingExperience);
+  const maxSessionsPerDay = tripleDayOk ? 3 : 2;
+  const maxFeasibleSessions = maxSessionsPerDay * (7 - offDaysCount);
   if (sessions > maxFeasibleSessions) {
     warnings.push(
-      `${sessions} séances/semaine demandées avec ${offDaysCount} jour(s) de repos obligatoire(s) : le calendrier ne peut jamais dépasser 2 séances réelles par jour (règle de sécurité anti-surcharge), soit un maximum absolu de ${maxFeasibleSessions} séances/semaine dans ta configuration actuelle. Réduis le nombre de séances visées, ou libère un jour de repos obligatoire, pour que le plan généré puisse vraiment respecter ce total sans empiler plus de 2 séances le même jour.`
+      tripleDayOk
+        ? `${sessions} séances/semaine demandées avec ${offDaysCount} jour(s) de repos obligatoire(s) : même avec ton profil (éligible aux jours à 3 séances), le calendrier ne peut jamais dépasser 3 séances réelles par jour, soit un maximum absolu de ${maxFeasibleSessions} séances/semaine dans ta configuration actuelle. Réduis le nombre de séances visées, ou libère un jour de repos obligatoire.`
+        : `${sessions} séances/semaine demandées avec ${offDaysCount} jour(s) de repos obligatoire(s) : le calendrier ne peut pas dépasser 2 séances réelles par jour pour ton profil actuel (les jours à 3 séances sont réservés à une expérience confirmée/expert avec ≥12h/sem — voir le message ci-dessus), soit un maximum absolu de ${maxFeasibleSessions} séances/semaine dans ta configuration actuelle. Réduis le nombre de séances visées, libère un jour de repos obligatoire, ou augmente ton volume horaire déclaré si ton niveau réel le permet.`
     );
   }
 
