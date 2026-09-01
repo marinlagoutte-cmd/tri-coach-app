@@ -1,5 +1,14 @@
 import React, { useMemo, useState } from 'react';
-import { checkPlanCoherence } from '../lib/workouts';
+import { checkPlanCoherence, isTripleDayEligible } from '../lib/workouts';
+
+// Plafond du slider "nombre de séances par semaine". Historiquement 14 (= 7 jours × 2
+// séances max/jour). Relevé à 21 (= 7 jours × 3) pour permettre les triples journées —
+// mais le garde-fou déterministe (enforceMaxSessionsPerDay, lib/workouts.js) n'autorise
+// RÉELLEMENT 3 séances/jour que pour un profil expérience confirmée/expert + volume
+// ≥12h/sem (voir isTripleDayEligible, importé ci-dessus) : au-delà de 14 sans ce profil,
+// le total demandé retombera légèrement en dessous plutôt que de forcer une triple
+// journée non justifiée — d'où l'avertissement affiché sous le slider.
+const MAX_SESSIONS_PER_WEEK_SLIDER = 21;
 
 const AVG_TIME_TABLE = {
   running: {
@@ -837,10 +846,10 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
                   >
                     −
                   </button>
-                  <input type="range" min="2" max="14" step="1" value={formData.maxSessionsPerWeek} onChange={(e) => setFormData({ ...formData, maxSessionsPerWeek: Number(e.target.value) })} className="w-full accent-volt-500 cursor-pointer" />
+                  <input type="range" min="2" max={MAX_SESSIONS_PER_WEEK_SLIDER} step="1" value={formData.maxSessionsPerWeek} onChange={(e) => setFormData({ ...formData, maxSessionsPerWeek: Number(e.target.value) })} className="w-full accent-volt-500 cursor-pointer" />
                   <button
                     type="button"
-                    onClick={() => setFormData({ ...formData, maxSessionsPerWeek: Math.min(14, Number(formData.maxSessionsPerWeek) + 1) })}
+                    onClick={() => setFormData({ ...formData, maxSessionsPerWeek: Math.min(MAX_SESSIONS_PER_WEEK_SLIDER, Number(formData.maxSessionsPerWeek) + 1) })}
                     className="shrink-0 w-11 h-11 rounded-xl border border-ink-800 bg-ink-950 text-volt-400 text-lg font-bold flex items-center justify-center active:bg-ink-800"
                     aria-label="Augmenter le nombre de séances"
                   >
@@ -849,6 +858,13 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
                 </div>
                 {Number(formData.maxSessionsPerWeek) > 7 && (
                   <p className="text-xs text-volt-400 mt-1">⚡ Plus de 7 séances/semaine implique des jours "doubles" (2 séances le même jour, ex : brick).</p>
+                )}
+                {Number(formData.maxSessionsPerWeek) > 12 && !isTripleDayEligible(formData.fitnessLevel, formData.hoursPerWeek, formData.trainingExperience) && (
+                  <p className="text-xs text-amber-400 mt-1">
+                    ⚠️ Au-delà de 12 séances/semaine il faut des jours à 3 séances — réservé aux profils
+                    expérience confirmée/expert avec ≥12h/sem. Avec ton profil actuel, le plan restera
+                    plafonné à 2 séances/jour et le total réel sera légèrement inférieur à {formData.maxSessionsPerWeek}.
+                  </p>
                 )}
               </div>
 
@@ -859,7 +875,8 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
                 </select>
                 <p className="text-[10px] text-ink-500 mt-1.5">
                   Avec {formData.maxSessionsPerWeek} séance(s)/semaine, le plan comptera <strong className="text-volt-400">{Math.max(0, 7 - Number(formData.maxSessionsPerWeek))} jour(s) de repos</strong>
-                  {Number(formData.maxSessionsPerWeek) > 7 && <> (avec {Number(formData.maxSessionsPerWeek) - 7} jour(s) double(s))</>} sur la semaine (dont le {formData.offDays}, obligatoire).
+                  {Number(formData.maxSessionsPerWeek) > 7 && Number(formData.maxSessionsPerWeek) <= 14 && <> (avec {Number(formData.maxSessionsPerWeek) - 7} jour(s) double(s))</>}
+                  {Number(formData.maxSessionsPerWeek) > 14 && <> (avec des jours doubles, et des jours triples si ton profil y est éligible — voir avertissement ci-dessus)</>} sur la semaine (dont le {formData.offDays}, obligatoire).
                 </p>
               </div>
 
