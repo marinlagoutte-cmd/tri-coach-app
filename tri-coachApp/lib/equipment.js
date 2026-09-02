@@ -178,6 +178,24 @@ async function backfillComponents(admin, equipmentId, gear) {
  * son suivi ici — l'athlète peut ensuite corriger cette base au cas par cas (pièce déjà usée
  * à l'ajout) via l'historique.
  *
+ * BUG RÉEL SIGNALÉ (chaussures bloquées à 0 km en continu, alors que des activités leur sont
+ * bien rattachées) : `athlete.shoes[].distance` renvoyé par l'endpoint `/athlete` de Strava
+ * est le total déclaré CÔTÉ STRAVA pour ce matériel — et il arrive que ce total reste à 0 ou
+ * ne se mette pas à jour pour une paire de chaussures (contrairement aux vélos, où ça n'a pas
+ * été observé), typiquement quand le compte a été connecté à l'app AVANT que le scope
+ * `profile:read_all` soit demandé (voir lib/stravaClient.js) : Strava ne redonne PAS
+ * automatiquement les scopes ajoutés après-coup à un token déjà autorisé, il faut que
+ * l'athlète déconnecte/reconnecte Strava pour les obtenir — sans ce scope, `distance` sur le
+ * matériel peut rester à 0 silencieusement (pas d'erreur, juste une valeur manquante).
+ * Plutôt que de dépendre uniquement de cette valeur potentiellement absente, on la CROISE
+ * avec la somme des activités déjà importées localement pour ce gear_id (table
+ * `strava_activities`, déjà peuplée par l'import normal des activités — voir
+ * pages/api/strava/sync.js et webhook.js) et on retient le PLUS GRAND des deux totaux : le
+ * total Strava reste la source de vérité quand il fonctionne (il inclut aussi les activités
+ * antérieures à la liaison du compte, que l'app n'a jamais importées), mais s'il est resté
+ * bloqué à 0 malgré des activités bien rattachées à ce gear_id, la somme locale prend le
+ * relais plutôt que d'afficher un kilométrage manifestement faux.
+ *
  * Best-effort : les erreurs Strava/DB sont avalées (retourne { synced: 0 }) pour ne jamais
  * faire échouer l'import d'activités qui déclenche cet appel en tâche de fond.
  */
@@ -194,8 +212,37 @@ export async function syncEquipmentFromStrava(admin, userId, accessToken) {
     console.log('[lib/equipment] gearList extrait:', JSON.stringify(gearList));
     if (gearList.length === 0) return { synced: 0 };
 
+    // Repli déterministe décrit ci-dessus : somme des activités déjà importées localement,
+    // par gear_id, TOUTE PÉRIODE confondue (contrairement à usageRateByGear côté
+    // EquipmentTracker.js qui se limite volontairement à 60 jours pour un RYTHME récent —
+    // ici on veut le TOTAL, donc pas de fenêtre de date).
+    const gearIds = gearList.map((g) => g.stravaGearId).filter(Boolean);
+    const localSumByGearId = {};
+    if (gearIds.length > 0) {
+      const { data: localRows, error: localSumError } = await admin
+        .from('strava_activities')
+        .select('gear_id, distance_m')
+        .eq('user_id', userId)
+        .in('gear_id', gearIds);
+      if (localSumError) {
+        console.error('[lib/equipment] syncEquipmentFromStrava: lecture activités locales (repli km) a échoué :', localSumError.message);
+      } else {
+        (localRows || []).forEach((r) => {
+          if (!r.gear_id || !r.distance_m) return;
+          localSumByGearId[r.gear_id] = (localSumByGearId[r.gear_id] || 0) + r.distance_m;
+        });
+      }
+    }
+
     let synced = 0;
-    for (const gear of gearList) {
+    for (const rawGear of gearList) {
+      const localSumM = localSumByGearId[rawGear.stravaGearId] || 0;
+      const correctedDistanceM = Math.max(rawGear.distanceM || 0, localSumM);
+      if (localSumM > (rawGear.distanceM || 0)) {
+        console.log(`[lib/equipment] ${rawGear.kind} "${rawGear.name}" : total Strava (${rawGear.distanceM || 0}m) < somme locale (${localSumM}m) — repli sur la somme locale.`);
+      }
+      const gear = { ...rawGear, distanceM: correctedDistanceM };
+
       // eslint-disable-next-line no-await-in-loop
       const { data: existing } = await admin
         .from('equipment')
