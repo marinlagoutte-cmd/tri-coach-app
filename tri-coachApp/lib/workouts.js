@@ -2166,8 +2166,17 @@ const BEGINNER_RAMP_FACTOR = { N: 0.7, 'N+1': 0.82 };
  * clous). Ne s'applique JAMAIS s'il existe déjà un historique de ressenti (l'athlète a déjà au
  * moins une semaine derrière lui, la progressivité doit alors suivre son ressenti réel via
  * applyEasierTrendProgression / applyFatigueAutoRegulation plutôt qu'un facteur générique figé).
+ *
+ * EXCEPTION (demande explicite de l'athlète) : `hasExistingTrainingBase` — case à cocher du
+ * questionnaire ("je suis déjà une préparation/un plan structuré actuellement") — court-circuite
+ * complètement ce ralenti, QUEL QUE SOIT le niveau/l'expérience déclarés. Objectif : un athlète
+ * qui coche prudemment "novice/intermédiaire" par méconnaissance du barème, mais qui s'entraîne
+ * déjà réellement, ne doit pas se retrouver avec un volume de départ artificiellement bas —
+ * l'app n'a pas (encore) de mécanisme d'import réel des séances déjà faites ailleurs, donc cette
+ * case sert de déclaration explicite de niveau réel en attendant.
  */
-export function applyBeginnerFirstPlanRamp(weekWorkouts, fitnessLevel, trainingExperience, feedbackHistory, weekKey) {
+export function applyBeginnerFirstPlanRamp(weekWorkouts, fitnessLevel, trainingExperience, feedbackHistory, weekKey, hasExistingTrainingBase) {
+  if (hasExistingTrainingBase) return weekWorkouts;
   const level = Number(fitnessLevel) || 3;
   const expRank = EXPERIENCE_RANK[trainingExperience] || 3;
   if (level > 2 || expRank > 2) return weekWorkouts;
@@ -2216,7 +2225,16 @@ export function applyEasierTrendProgression(weekWorkouts, trendDirection) {
   } : w));
 }
 
-export function enforceBeginnerProgression(weekWorkouts, fitnessLevel, phaseKey, trainingExperience) {
+/**
+ * EXCEPTION (même case à cocher que applyBeginnerFirstPlanRamp ci-dessous, "je suis déjà une
+ * préparation/un plan structuré actuellement") : `hasExistingTrainingBase` désactive aussi ce
+ * plafond, pour la même raison — sinon un athlète déjà bien entraîné mais ayant déclaré un
+ * niveau/expérience prudent se retrouverait avec un volume de départ corrigé (ramp désactivé)
+ * mais des séances dures/longues quand même plafonnées à vie sur tout le plan, ce qui serait
+ * incohérent avec l'intention de la case.
+ */
+export function enforceBeginnerProgression(weekWorkouts, fitnessLevel, phaseKey, trainingExperience, hasExistingTrainingBase) {
+  if (hasExistingTrainingBase) return weekWorkouts;
   const level = Number(fitnessLevel) || 3;
   const expRank = EXPERIENCE_RANK[trainingExperience] || 3;
   if (level > 2 && expRank > 2) return weekWorkouts;
