@@ -23,6 +23,7 @@ import { STORAGE_KEYS, loadFromStorage, saveToStorage, setStorageSaveHook } from
 import { DEFAULT_PROFILE, DEFAULT_TRAINING_PLAN, DEFAULT_WORKOUTS, EMPTY_TRAINING_PLAN, EMPTY_WORKOUTS } from '../lib/defaults';
 import { computeRaceStats, shortLabel, sanitizeWorkout, forceRecalcWeekPaces, forceRecalcWorkoutPaces } from '../lib/workouts';
 import { analyzeFeedback, summarizeFeedbackTrend } from '../lib/feedback';
+import { computeCurrentPhase } from '../lib/cycleTracking';
 import { getWeeksOutlook, getWeekLabel } from '../lib/periodization';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { setCloudUser, fetchAndMergeCloudData, queueCloudPush, pushCloudDataNow, flushCloudPushOnHide } from '../lib/cloudSync';
@@ -677,7 +678,14 @@ export default function Home() {
   const handleSubmitFeedback = (workout, difficulty, capacity) => {
     // Garde-fou : une séance déjà validée ne peut pas l'être une seconde fois.
     if (feedbackHistory.some((f) => f.workoutId === workout.id)) return;
-    const analysis = analyzeFeedback(workout, { difficulty, capacity }, feedbackHistory);
+    // Point 8 (cycle menstruel) "si besoin" — voir lib/feedback.js/isHigherPerceivedEffortPhase :
+    // phase estimée au moment de la validation (proxy raisonnable du jour de la séance,
+    // celle-ci étant généralement validée le jour même ou le lendemain). Toujours `null` si
+    // le suivi n'est pas activé ou qu'aucune date n'a été déclarée — n'influence l'analyse
+    // que dans ce cas précis, jamais par défaut.
+    const menstrualCycle = loadFromStorage(STORAGE_KEYS.menstrualCycle, null);
+    const cyclePhase = computeCurrentPhase(menstrualCycle);
+    const analysis = analyzeFeedback(workout, { difficulty, capacity }, feedbackHistory, cyclePhase);
     const entry = {
       workoutId: workout.id,
       day: workout.day,
