@@ -91,6 +91,10 @@ export async function importStravaActivities({
       matched_week_key: weekKey,
       matched_workout_id: workoutId,
       match_source: weekKey ? 'auto' : 'none',
+      // Même règle que pages/api/strava/webhook.js (voir son commentaire pour le détail) :
+      // une correspondance automatique coche directement la séance comme faite, sans clic de
+      // confirmation — demande explicite de l'athlète.
+      match_confirmed: Boolean(weekKey),
       // 'skipped' explicitement (voir sync.js) : pas d'analyse IA sur un import en masse —
       // sauf activités de la semaine en cours si analyzeCurrentWeekWithAI (voir ci-dessous),
       // qui écrase ce statut pour celles-là seulement.
