@@ -53,10 +53,47 @@ function daysBetween(a, b) {
 }
 
 /**
+ * Bornes de phase (en jour de cycle 1..cycleLength) réellement utilisées pour un jeu de
+ * données donné. Si l'athlète a explicitement redéfini la durée de ses phases
+ * (`data.phaseLengths`, ex: {menstrual: 6, follicular: 7, ovulation: 2, luteal: 13} —
+ * voir components/CycleTracker.js, section "Ajuster mes phases si je les connais"), ces
+ * durées sont utilisées telles quelles, mises bout à bout dans l'ordre menstruelle →
+ * folliculaire → ovulation → lutéale, PUIS proportionnellement recalées si leur somme ne
+ * correspond plus exactement à `avgCycleLength` (ex: cycle un peu plus court ce mois-ci) —
+ * pour ne jamais avoir de jour du cycle sans phase assignée. Sans override déclaré, on
+ * retombe sur le modèle proportionnel par défaut (CYCLE_PHASES, référentiel 28 jours).
+ */
+export function getPhaseBoundaries(data) {
+  const cycleLength = Number(data?.avgCycleLength) > 0 ? Number(data.avgCycleLength) : 28;
+  const overrides = data?.phaseLengths;
+  const hasValidOverrides = overrides && CYCLE_PHASES.every((p) => Number(overrides[p.key]) > 0);
+
+  if (!hasValidOverrides) {
+    const scale = cycleLength / 28;
+    return CYCLE_PHASES.map((p) => ({ ...p, startDay: Math.round(p.startDay * scale), endDay: Math.round(p.endDay * scale) }));
+  }
+
+  const totalDeclared = CYCLE_PHASES.reduce((sum, p) => sum + Number(overrides[p.key]), 0);
+  const rescale = cycleLength / totalDeclared; // ramène au total réellement déclaré ce mois-ci
+  let cursor = 1;
+  return CYCLE_PHASES.map((p) => {
+    const length = Math.max(1, Math.round(Number(overrides[p.key]) * rescale));
+    const startDay = cursor;
+    const endDay = Math.min(cycleLength, cursor + length - 1);
+    cursor = endDay + 1;
+    return { ...p, startDay, endDay };
+  });
+}
+
+/**
  * Calcule la phase du cycle estimée à la date de référence, à partir de la dernière date
  * de règles déclarée (`data.periodStartDates`, triées) et de la longueur de cycle moyenne
  * déclarée (`data.avgCycleLength`, défaut 28). Renvoie `null` si le suivi n'est pas activé
  * ou si aucune date n'a encore été déclarée — jamais une phase devinée sans donnée réelle.
+ * Fonctionne aussi bien pour une date passée que future (voir getMonthPhaseMap ci-dessous,
+ * qui l'appelle jour par jour pour construire le calendrier du mois affiché) : le cycle est
+ * supposé se répéter régulièrement à la longueur déclarée tant qu'aucune nouvelle date de
+ * règles n'est venue le recaler.
  */
 export function computeCurrentPhase(data, referenceDate = new Date()) {
   if (!data?.enabled) return null;
@@ -71,10 +108,44 @@ export function computeCurrentPhase(data, referenceDate = new Date()) {
   // Jour du cycle (1-indexé), en supposant un nouveau cycle démarré si on a dépassé la
   // longueur déclarée (cas où l'athlète n'a pas encore renseigné le cycle suivant).
   const dayInCycle = (daysSinceLast % cycleLength) + 1;
-  const scale = cycleLength / 28;
+  const boundaries = getPhaseBoundaries(data);
 
-  const phase = CYCLE_PHASES.find((p) => dayInCycle >= Math.round(p.startDay * scale) && dayInCycle <= Math.round(p.endDay * scale))
-    || CYCLE_PHASES[CYCLE_PHASES.length - 1];
+  const phase = boundaries.find((p) => dayInCycle >= p.startDay && dayInCycle <= p.endDay)
+    || boundaries[boundaries.length - 1];
 
   return { ...phase, dayInCycle, cycleLength, lastPeriodStart: lastStart };
+}
+
+/**
+ * Carte des phases pour chaque jour d'un mois donné (`month` 0-indexé comme Date.getMonth())
+ * — utilisée par le calendrier simple de components/CycleTracker.js pour afficher la
+ * projection du mois en cours ou d'un mois à venir/passé (flèches de navigation). Renvoie un
+ * tableau vide si le suivi n'est pas activé ou si aucune date n'a été déclarée (rien à
+ * projeter). Chaque entrée : { date: 'YYYY-MM-DD', day: <jour du mois>, phase }.
+ */
+export function getMonthPhaseMap(data, year, month) {
+  if (!data?.enabled || !(data.periodStartDates || []).length) return [];
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const result = [];
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const d = new Date(year, month, day);
+    const phase = computeCurrentPhase(data, d);
+    result.push({ date: d.toISOString().slice(0, 10), day, phase });
+  }
+  return result;
+}
+
+/**
+ * Signal utilisé par lib/feedback.js (analyzeFeedback) : indique si la phase donnée est une
+ * phase où un RPE/fatigue plus élevé qu'à l'accoutumée est PHYSIOLOGIQUEMENT ATTENDU (phase
+ * menstruelle, ou tout derniers jours de la phase lutéale juste avant les règles — voir la
+ * guidance de CYCLE_PHASES ci-dessus) — donc PAS un signal de surcharge à traiter comme les
+ * autres. Renvoie toujours `false` si aucune phase n'est fournie (suivi désactivé ou aucune
+ * date déclarée) : "si besoin" seulement, jamais une hypothèse par défaut.
+ */
+export function isHigherPerceivedEffortPhase(phase) {
+  if (!phase) return false;
+  if (phase.key === 'menstrual') return true;
+  if (phase.key === 'luteal') return phase.dayInCycle >= phase.cycleLength - 3;
+  return false;
 }
