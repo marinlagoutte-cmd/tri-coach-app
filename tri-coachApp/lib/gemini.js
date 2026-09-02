@@ -436,7 +436,7 @@ const EXPERIENCE_LABELS = {
  * spécifique à l'endurance (tendons/os non adaptés à l'impact, aucun vécu de gestion d'allure) :
  * la PÉDAGOGIE et la COMPLEXITÉ des séances doivent suivre l'expérience, pas la forme.
  */
-function describeAthleteAdaptation(fitnessLevel, trainingExperience) {
+function describeAthleteAdaptation(fitnessLevel, trainingExperience, hasExistingTrainingBase) {
   const level = Number(fitnessLevel) || 3;
   const expRank = EXPERIENCE_RANK[trainingExperience] || 3;
   const expLabel = EXPERIENCE_LABELS[trainingExperience] || EXPERIENCE_LABELS.intermediaire;
@@ -452,7 +452,18 @@ le permettrait — la complexité doit suivre le VÉCU d'entraînement, pas seul
 ne réexplique pas les fondamentaux, va droit au but sur l'objectif de chaque séance.`
       : `PÉDAGOGIE (expérience : ${expLabel}) : équilibre entre explication du "pourquoi" et contenu technique.`;
 
-  const fitnessBlock = level <= 2
+  // EXCEPTION (demande explicite de l'athlète, même case à cocher que le garde-fou déterministe
+  // applyBeginnerFirstPlanRamp/enforceBeginnerProgression côté lib/workouts.js) : si l'athlète a
+  // indiqué suivre déjà une préparation/un plan structuré actuellement, on ne réduit PAS le volume
+  // ni les bornes chiffrées de départ même si le niveau/expérience déclarés sont bas — seule la
+  // PÉDAGOGIE (vocabulaire, explication du "pourquoi") continue de suivre l'expérience déclarée,
+  // qui reste un axe distinct (voir docstring ci-dessus) non concerné par cette case.
+  const fitnessBlock = hasExistingTrainingBase
+    ? `FORME ACTUELLE (${level}/5) : l'athlète a explicitement indiqué suivre déjà une préparation/un plan
+structuré actuellement — NE PAS appliquer de montée en charge prudente de débutant même si le niveau
+déclaré ci-dessus est bas. Base-toi directement sur le volume horaire et le nombre de séances
+réellement déclarés au questionnaire dès la semaine 1, sans réduction de précaution.`
+    : level <= 2
     ? `FORME ACTUELLE (${level}/5) : volume et intensité de départ prudents, progression très progressive
 (jamais +10% de volume hebdo d'une semaine à l'autre).`
     : level >= 4
@@ -460,7 +471,9 @@ ne réexplique pas les fondamentaux, va droit au but sur l'objectif de chaque s�
 phase de base.`
       : `FORME ACTUELLE (${level}/5) : progression standard, intensité modérée introduite progressivement.`;
 
-  const boundsBlock = (level <= 2 || expRank <= 2)
+  const boundsBlock = hasExistingTrainingBase
+    ? ''
+    : (level <= 2 || expRank <= 2)
     ? `
 BORNES CHIFFRÉES OBLIGATOIRES (phase base/développement — dès que la FORME est ≤2 OU l'EXPÉRIENCE est ≤2,
 la plus prudente des deux règles prime) :
@@ -963,7 +976,7 @@ export async function generatePlanWithAI({ wizardData, profile, feedbackHistory,
   const currentPhaseKey = phases?.[0]?.key || 'base';
   const macrocyclesDescription = formatMacrocyclesForPrompt(phases);
   const sessionAllocation = describeSessionAllocation(wizardData);
-  const fitnessAdaptation = describeAthleteAdaptation(wizardData.fitnessLevel, wizardData.trainingExperience);
+  const fitnessAdaptation = describeAthleteAdaptation(wizardData.fitnessLevel, wizardData.trainingExperience, wizardData.hasExistingTrainingBase);
   const isTriathlon = wizardData.sportType === 'triathlon';
 
   const fitnessLabels = { 1: 'débutant', 2: 'novice', 3: 'intermédiaire', 4: 'confirmé', 5: 'expert/compétiteur' };
@@ -1315,7 +1328,7 @@ Réponds UNIQUEMENT avec les séances corrigées (tu peux ne renvoyer QUE les jo
     // uniquement de l'obéissance de l'IA au prompt (voir describeAthleteAdaptation). On
     // plafonne donc ici, de façon déterministe, les séances trop exigeantes pour ce profil
     // en phase base/développement (jamais en peak/taper).
-    sanitized[weekKey] = enforceBeginnerProgression(sanitized[weekKey], wizardData.fitnessLevel, currentPhaseKey, wizardData.trainingExperience);
+    sanitized[weekKey] = enforceBeginnerProgression(sanitized[weekKey], wizardData.fitnessLevel, currentPhaseKey, wizardData.trainingExperience, wizardData.hasExistingTrainingBase);
 
     // ROBUSTESSE (AJOUTÉE) : un débutant complet/novice qui démarre son TOUT PREMIER plan
     // (aucun historique de ressenti) ne doit pas se voir imposer d'emblée le volume/nombre
@@ -1323,7 +1336,7 @@ Réponds UNIQUEMENT avec les séances corrigées (tu peux ne renvoyer QUE les jo
     // VOLUME GLOBAL des toutes premières semaines, pas seulement sur le plafonnement séance
     // par séance ci-dessus. Sans historique, enforceBeginnerProgression seul ne réduit que
     // les séances individuellement trop dures/longues, jamais le total hebdomadaire.
-    sanitized[weekKey] = applyBeginnerFirstPlanRamp(sanitized[weekKey], wizardData.fitnessLevel, wizardData.trainingExperience, feedbackHistory, weekKey);
+    sanitized[weekKey] = applyBeginnerFirstPlanRamp(sanitized[weekKey], wizardData.fitnessLevel, wizardData.trainingExperience, feedbackHistory, weekKey, wizardData.hasExistingTrainingBase);
 
     // ROBUSTESSE (AJOUTÉE) : garantit un volume de natation minimum cohérent avec le niveau
     // déclaré — voir enforceSwimVolumeFloor dans lib/workouts.js pour le détail (le prompt
@@ -1470,7 +1483,7 @@ export async function regenerateWeekWithAI({ weekKey = 'N+1', profile, workouts,
   const currentPhaseKey = phases?.[0]?.key || 'base';
   const macrocyclesDescription = formatMacrocyclesForPrompt(phases);
   const sessionAllocation = describeSessionAllocation(wizardData);
-  const fitnessAdaptation = describeAthleteAdaptation(wizardData.fitnessLevel, wizardData.trainingExperience);
+  const fitnessAdaptation = describeAthleteAdaptation(wizardData.fitnessLevel, wizardData.trainingExperience, wizardData.hasExistingTrainingBase);
 
   const fitnessLabels = { 1: 'débutant', 2: 'novice', 3: 'intermédiaire', 4: 'confirmé', 5: 'expert/compétiteur' };
   const fitnessLabel = fitnessLabels[wizardData.fitnessLevel] || 'intermédiaire';
@@ -1616,8 +1629,8 @@ Réponds UNIQUEMENT avec les séances corrigées (tu peux ne renvoyer QUE les jo
   target = rebalanceSameDisciplineDoubles(target, wizardData.sportType, wizardData.offDays, wizardData.maxSessionsPerWeek);
   target = enforceThirdSessionLowIntensity(target);
   target = dedupeIdenticalSameDaySessions(target).map((w) => sanitizeWorkout(w, profileForSanitize));
-  target = enforceBeginnerProgression(target, wizardData.fitnessLevel, currentPhaseKey, wizardData.trainingExperience);
-  target = applyBeginnerFirstPlanRamp(target, wizardData.fitnessLevel, wizardData.trainingExperience, feedbackHistory, weekKey);
+  target = enforceBeginnerProgression(target, wizardData.fitnessLevel, currentPhaseKey, wizardData.trainingExperience, wizardData.hasExistingTrainingBase);
+  target = applyBeginnerFirstPlanRamp(target, wizardData.fitnessLevel, wizardData.trainingExperience, feedbackHistory, weekKey, wizardData.hasExistingTrainingBase);
   target = enforceSwimVolumeFloor(target, wizardData.fitnessLevel, wizardData.trainingExperience, currentPhaseKey);
   target = enforceLongSessionFloor(target, wizardData.trainingExperience, currentPhaseKey);
   target = enforceDoubleThresholdEligibility(target, wizardData.fitnessLevel, wizardData.hoursPerWeek, wizardData.trainingExperience);
