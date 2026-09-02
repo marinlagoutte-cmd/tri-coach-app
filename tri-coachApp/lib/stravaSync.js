@@ -83,24 +83,39 @@ export async function importStravaActivities({
   }
 
   const { profile, workouts, language } = await loadAthleteContext(admin, userId);
-  const rows = missingActivities.map((raw) => {
+  // Séances déjà associées-confirmées à une activité EXISTANTE de la semaine en cours (même
+  // principe que webhook.js — voir son commentaire pour le détail), + celles revendiquées par
+  // une activité DÉJÀ TRAITÉE plus tôt dans CE MÊME LOT d'import (boucle for ci-dessous,
+  // claimedWorkoutIds mis à jour au fur et à mesure) : sans ça, deux activités de la même
+  // semaine importées d'un coup pourraient revendiquer la même séance planifiée.
+  const { data: alreadyClaimedRows } = await admin
+    .from('strava_activities')
+    .select('matched_workout_id')
+    .eq('user_id', userId)
+    .eq('matched_week_key', 'N')
+    .eq('match_confirmed', true);
+  const claimedWorkoutIds = new Set((alreadyClaimedRows || []).map((r) => r.matched_workout_id).filter(Boolean));
+
+  const rows = [];
+  for (const raw of missingActivities) {
     const row = toActivityRow(raw, userId);
-    const { weekKey, workoutId } = findAutoMatch(row, workouts);
-    return {
+    const { weekKey, workoutId, confidence } = findAutoMatch(row, workouts, claimedWorkoutIds);
+    if (confidence === 'exact') claimedWorkoutIds.add(workoutId); // revendiquée pour le reste du lot
+    rows.push({
       ...row,
       matched_week_key: weekKey,
       matched_workout_id: workoutId,
       match_source: weekKey ? 'auto' : 'none',
       // Même règle que pages/api/strava/webhook.js (voir son commentaire pour le détail) :
-      // une correspondance automatique coche directement la séance comme faite, sans clic de
-      // confirmation — demande explicite de l'athlète.
-      match_confirmed: Boolean(weekKey),
+      // seule une correspondance 'exact' coche directement la séance comme faite ; une
+      // correspondance 'fuzzy' (autre jour que prévu) reste une suggestion à valider.
+      match_confirmed: confidence === 'exact',
       // 'skipped' explicitement (voir sync.js) : pas d'analyse IA sur un import en masse —
       // sauf activités de la semaine en cours si analyzeCurrentWeekWithAI (voir ci-dessous),
       // qui écrase ce statut pour celles-là seulement.
       ai_analysis_status: 'skipped',
-    };
-  });
+    });
+  }
 
   // Analyse IA détaillée (laps + double-check Gemini/Groq) des activités de la semaine en
   // cours uniquement — voir doc du paramètre plus haut. Séquentiel (pas Promise.all) pour ne
