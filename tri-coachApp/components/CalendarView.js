@@ -1,6 +1,6 @@
 import React from 'react';
 import { shortLabel, parseClubSessionDesc } from '../lib/workouts';
-import { groupActivitiesByDayThisWeek, formatKm, formatDurationFromSeconds } from '../lib/stravaMatch';
+import { groupActivitiesByDayThisWeek, formatKm, formatDurationFromSeconds, isoDateToDayName } from '../lib/stravaMatch';
 import { stravaSportToDiscipline } from '../lib/stravaClient';
 
 export { shortLabel };
@@ -149,7 +149,12 @@ function BrickConnector({ sessions }) {
 // SessionPill + ActivityPill par une seule pastille "prévu → réalisé", pour ne
 // pas doubler l'affichage d'une même séance dans le calendrier une fois que
 // l'athlète a validé la correspondance.
-function MergedSessionPill({ workout, activity, compact, onSelectActivity, isValidated, hideOwnBadge }) {
+//
+// PLACEMENT (demande explicite de l'athlète) : affichée sous le jour RÉELLEMENT effectué
+// (celui de l'activité Strava), jamais sous le jour initialement PLANIFIÉ — voir
+// plannedDayIfDifferent, qui indique alors "prévue [jour]" pour ne pas perdre ce repère.
+// Là où la séance était planifiée à l'origine, voir MovedSessionPill ci-dessous.
+function MergedSessionPill({ workout, activity, compact, onSelectActivity, isValidated, hideOwnBadge, plannedDayIfDifferent }) {
   return (
     <button
       type="button"
@@ -175,9 +180,39 @@ function MergedSessionPill({ workout, activity, compact, onSelectActivity, isVal
       <p className="text-[9px] font-mono text-emerald-400 mt-1 truncate">
         Réalisé · {formatKm(activity.distance_m)} · {formatDurationFromSeconds(activity.moving_time_s)}
       </p>
+      {plannedDayIfDifferent && (
+        <p className="text-[9px] text-ink-500 mt-0.5">Prévue {plannedDayIfDifferent}</p>
+      )}
       {!compact && workout.intensity && (
         <p className="text-[10px] text-ink-500 mt-1 leading-snug break-words">Prévu : {workout.intensity}</p>
       )}
+    </button>
+  );
+}
+
+// Pastille de la séance à son jour PLANIFIÉ D'ORIGINE, quand elle a finalement été réalisée
+// (et confirmée) un AUTRE jour — voir MergedSessionPill, qui affiche la vraie fusion là-bas.
+// Évite d'afficher deux fois la même séance (une fois "prévue" ici, une fois "réalisée"
+// là-bas) tout en gardant une trace visuelle claire de son déplacement dans la semaine.
+function MovedSessionPill({ workout, compact, onSelectActivity, activity, realDayName, hideOwnBadge }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelectActivity?.(activity)}
+      className="w-full text-left rounded-lg p-2 border border-ink-800 opacity-60"
+    >
+      <div className="flex justify-between items-center gap-1 mb-1">
+        {!hideOwnBadge && (
+          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 uppercase font-mono leading-none ${badgeClass(workout.type)}`}>
+            {shortLabel(workout.type)}
+          </span>
+        )}
+        <span className="text-emerald-400 font-bold text-[10px] ml-auto" title="Réalisée un autre jour">↷</span>
+      </div>
+      <p className={`text-xs font-bold text-ink-200 leading-snug break-words hyphens-auto ${compact ? 'line-clamp-2' : 'line-clamp-2'}`}>
+        {workout.title}
+      </p>
+      <p className="text-[9px] text-ink-500 mt-1">Faite {realDayName || 'un autre jour'}</p>
     </button>
   );
 }
@@ -199,6 +234,18 @@ export default function CalendarView({
   // calendaire réelle en cours) — jamais affichée sur Semaine N+1 (future, donc
   // par définition sans activité réalisée).
   const activitiesByDay = weekKey === 'N' ? groupActivitiesByDayThisWeek(activities) : {};
+
+  // Association CONFIRMÉE (voir ActivityDetail.js) par id de séance planifiée, calculée une
+  // seule fois pour TOUTE la semaine (pas jour par jour) — une correspondance peut désormais
+  // être 'fuzzy' (séance faite un autre jour que prévu, voir lib/stravaMatch.js), donc il faut
+  // pouvoir la retrouver quel que soit le jour réel de l'activité par rapport au jour planifié
+  // de la séance.
+  const confirmedActivityByWorkoutId = {};
+  if (weekKey === 'N') {
+    (activities || []).forEach((a) => {
+      if (a.matched_workout_id && a.match_confirmed) confirmedActivityByWorkoutId[a.matched_workout_id] = a;
+    });
+  }
 
   // Le filtrage par sport se fait ICI (au niveau de l'affichage jour par jour),
   // et non plus en amont sur la liste brute : sinon, un jour dont la séance ne
@@ -241,20 +288,30 @@ export default function CalendarView({
           const trainingSessions = sessions.filter((w) => w.type !== 'REPOS');
           const isBrickDay = trainingSessions.length > 1;
 
-          // Association CONFIRMÉE (voir ActivityDetail.js) pour une séance de ce jour :
-          // ces activités sont fusionnées dans la pastille de la séance elle-même, donc
-          // exclues de la liste "activités réalisées" affichée séparément plus bas —
-          // sinon l'athlète continuerait à voir la même sortie deux fois.
           const dayActivities = activitiesByDay[dayName] || [];
-          const confirmedMatchFor = (workoutId) => dayActivities.find((a) => a.matched_workout_id === workoutId && a.match_confirmed);
+          // Activités réalisées CE jour, sans association confirmée — pastille brute (comme
+          // avant), quel que soit le jour où une éventuelle suggestion 'fuzzy' pointerait.
           const unmergedActivities = dayActivities.filter((a) => !(a.matched_workout_id && a.match_confirmed));
+          // Activités réalisées CE jour, confirmées, dont la séance associée était planifiée
+          // un AUTRE jour (correspondance 'fuzzy' validée) : la fusion s'affiche ICI (jour
+          // réellement effectué — demande explicite de l'athlète), pas au jour planifié
+          // d'origine (voir MovedSessionPill, affichée là-bas à la place).
+          const crossDayMergedActivities = dayActivities
+            .filter((a) => a.matched_workout_id && a.match_confirmed)
+            .map((a) => ({ activity: a, workout: workoutList.find((w) => w.id === a.matched_workout_id) }))
+            .filter(({ workout }) => workout && workout.day?.toLowerCase() !== dayName.toLowerCase());
 
           const renderSession = (w, compact) => {
-            const merged = confirmedMatchFor(w.id);
-            return merged ? (
-              <MergedSessionPill key={w.id} workout={w} activity={merged} compact={compact} onSelectActivity={onSelectActivity} isValidated={validatedIds.has(w.id)} />
+            const matchedActivity = confirmedActivityByWorkoutId[w.id];
+            if (!matchedActivity) {
+              return <SessionPill key={w.id} workout={w} compact={compact} onSelectWorkout={onSelectWorkout} isValidated={validatedIds.has(w.id)} />;
+            }
+            const activityRealDay = isoDateToDayName(matchedActivity.start_date_local || matchedActivity.start_date);
+            const doneSameDay = activityRealDay?.toLowerCase() === dayName.toLowerCase();
+            return doneSameDay ? (
+              <MergedSessionPill key={w.id} workout={w} activity={matchedActivity} compact={compact} onSelectActivity={onSelectActivity} isValidated={validatedIds.has(w.id)} />
             ) : (
-              <SessionPill key={w.id} workout={w} compact={compact} onSelectWorkout={onSelectWorkout} isValidated={validatedIds.has(w.id)} />
+              <MovedSessionPill key={w.id} workout={w} compact={compact} activity={matchedActivity} realDayName={activityRealDay} onSelectActivity={onSelectActivity} />
             );
           };
 
@@ -288,8 +345,18 @@ export default function CalendarView({
                 </p>
               )}
 
-              {unmergedActivities.length > 0 && (
+              {(unmergedActivities.length > 0 || crossDayMergedActivities.length > 0) && (
                 <div className="flex flex-col gap-1 pt-1.5 mt-1 border-t border-dashed" style={{ borderColor: 'rgba(252,76,2,0.3)' }}>
+                  {crossDayMergedActivities.map(({ activity, workout }) => (
+                    <MergedSessionPill
+                      key={activity.id}
+                      workout={workout}
+                      activity={activity}
+                      onSelectActivity={onSelectActivity}
+                      isValidated={validatedIds.has(workout.id)}
+                      plannedDayIfDifferent={workout.day}
+                    />
+                  ))}
                   {unmergedActivities.map((a) => (
                     <ActivityPill key={a.id} activity={a} onSelectActivity={onSelectActivity} />
                   ))}
