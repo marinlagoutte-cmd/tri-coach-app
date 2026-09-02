@@ -58,6 +58,7 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
     weight: '',
     fitnessLevel: 3,
     trainingExperience: 'intermediaire', // 'debutant' | 'novice' | 'intermediaire' | 'confirme' | 'expert' — voir sélecteur ci-dessous
+    hasExistingTrainingBase: false, // coche "je suis déjà une prépa" — voir applyBeginnerFirstPlanRamp (lib/workouts.js)
     sportType: 'running', // 'running' | 'triathlon'
 
     runningSubtype: 'road', // 'road' | 'trail'
@@ -332,6 +333,28 @@ export default function WizardModal({ isOpen, onClose, onComplete, submitting = 
                   <option value="expert">Expert/compétiteur — 5 ans+ d'entraînement structuré</option>
                 </select>
               </div>
+
+              {/* Demande explicite de l'athlète : éviter une montée en charge trop basse en
+                  semaine 1/2 pour quelqu'un qui est DÉJÀ bien entraîné actuellement — même s'il
+                  a coché "novice/intermédiaire" ci-dessus par prudence, ou que sa forme du
+                  moment (curseur ci-dessus) semble modeste. `applyBeginnerFirstPlanRamp`
+                  (lib/workouts.js) réduit sinon automatiquement le volume des 2 premières
+                  semaines pour un profil débutant/novice sans historique — cette case
+                  court-circuite complètement ce ralenti, quel que soit le niveau déclaré. */}
+              <label className="flex items-start gap-3 p-3 rounded-xl bg-ink-950 border border-ink-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(formData.hasExistingTrainingBase)}
+                  onChange={(e) => setFormData({ ...formData, hasExistingTrainingBase: e.target.checked })}
+                  className="mt-0.5 w-5 h-5 accent-volt-500 shrink-0"
+                />
+                <span className="text-sm text-ink-300">
+                  Je suis déjà une préparation ou un plan d'entraînement structuré actuellement (pas de
+                  reprise à zéro) — <strong className="text-ink-100">ne pas alléger les 2 premières
+                  semaines</strong>, je pars déjà d'un bon niveau même si mon expérience déclarée ci-dessus
+                  ne le montre pas.
+                </span>
+              </label>
 
               <div>
                 <label className="text-sm text-ink-300 block mb-1.5">Type de sport</label>
