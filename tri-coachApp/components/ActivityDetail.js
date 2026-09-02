@@ -4,7 +4,7 @@ import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement
 import { supabase } from '../lib/supabase';
 import { stravaSportToDiscipline } from '../lib/stravaClient';
 import { shortLabel } from '../lib/workouts';
-import { formatKm, formatDurationFromSeconds, formatPaceFromSpeedMs } from '../lib/stravaMatch';
+import { formatKm, formatDurationFromSeconds, formatPaceFromSpeedMs, isoDateToDayName } from '../lib/stravaMatch';
 import { DARK_TILES, TILES_ATTRIBUTION } from '../lib/mapTiles';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
@@ -131,6 +131,7 @@ export default function ActivityDetail({ activity, session, workouts, onClose, o
   if (!activity) return null;
 
   const discipline = stravaSportToDiscipline(activity.sport_type);
+  const isoDayOfActivity = (isoDateToDayName(activity.start_date_local || activity.start_date) || '').toLowerCase();
   const weekWorkouts = (workouts?.N || []).filter((w) => w.type !== 'REPOS');
   const matchedWorkout = weekWorkouts.find((w) => w.id === activity.matched_workout_id);
 
@@ -262,7 +263,9 @@ export default function ActivityDetail({ activity, session, workouts, onClose, o
           </select>
 
           {activity.match_source === 'auto' && matchedWorkout && !activity.match_confirmed && (
-            <p className="text-[9px] text-ink-600">Association automatique proposée (jour + discipline) — vérifie puis confirme, ou change-la ci-dessus.</p>
+            <p className="text-[9px] text-ink-600">
+              Association automatique proposée{matchedWorkout.day && matchedWorkout.day.toLowerCase() !== isoDayOfActivity ? ` (séance prévue ${matchedWorkout.day}, faite un autre jour)` : ' (jour + discipline)'} — vérifie puis confirme, ou change-la ci-dessus.
+            </p>
           )}
 
           {hasPendingChange ? (
