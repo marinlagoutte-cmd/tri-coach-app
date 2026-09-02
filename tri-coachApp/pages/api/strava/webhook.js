@@ -87,6 +87,15 @@ async function handleActivityUpsert({ admin, athleteId, activityId, isUpdate }) 
       matched_week_key: weekKey,
       matched_workout_id: workoutId,
       match_source: weekKey ? 'auto' : 'none',
+      // Demande explicite de l'athlète (avant : une association auto restait "suggérée",
+      // affichait un bouton "Confirmer" dans ActivityDetail.js, et la séance planifiée ne se
+      // cochait PAS comme faite tant que ce clic n'avait pas eu lieu — voir le commentaire de
+      // persistMatch dans ce même composant pour l'ancien raisonnement UX) : désormais, une
+      // correspondance automatique (jour + discipline) coche directement la séance comme
+      // faite, sans étape de confirmation manuelle. Reste librement modifiable ensuite via le
+      // menu déroulant d'ActivityDetail.js (qui repasse alors match_source à 'manual') si le
+      // rapprochement automatique s'avérait faux (ex: sortie improvisée un jour de repos).
+      match_confirmed: Boolean(weekKey),
       ai_analysis: analysis,
       ai_analysis_status: analysisStatus,
     },
