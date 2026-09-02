@@ -63,7 +63,20 @@ async function handleActivityUpsert({ admin, athleteId, activityId, isUpdate }) 
   row.laps = Array.isArray(laps) && laps.length ? laps : null;
 
   const { profile, workouts, language } = await loadAthleteContext(admin, tokenRow.user_id);
-  const { weekKey, workoutId } = findAutoMatch(row, workouts);
+  // Séances déjà associées-confirmées à UNE AUTRE activité de la semaine en cours — jamais
+  // proposées de nouveau (voir doc de findAutoMatch, lib/stravaMatch.js). Ne regarde QUE
+  // matched_week_key='N' : une association sur une autre semaine ne peut pas entrer en
+  // conflit avec le matching de la semaine en cours.
+  const { data: alreadyClaimedRows } = await admin
+    .from('strava_activities')
+    .select('matched_workout_id')
+    .eq('user_id', tokenRow.user_id)
+    .eq('matched_week_key', 'N')
+    .eq('match_confirmed', true)
+    .neq('id', activityId); // exclut cette activité elle-même (cas d'un événement 'update')
+  const claimedWorkoutIds = new Set((alreadyClaimedRows || []).map((r) => r.matched_workout_id).filter(Boolean));
+
+  const { weekKey, workoutId, confidence } = findAutoMatch(row, workouts, claimedWorkoutIds);
   const plannedWorkout = weekKey ? (workouts[weekKey] || []).find((w) => w.id === workoutId) || null : null;
 
   // Double-check Gemini + Groq (voir lib/coGeneration.js:coAnalyzeStravaActivity) — mêmes
@@ -87,15 +100,16 @@ async function handleActivityUpsert({ admin, athleteId, activityId, isUpdate }) 
       matched_week_key: weekKey,
       matched_workout_id: workoutId,
       match_source: weekKey ? 'auto' : 'none',
-      // Demande explicite de l'athlète (avant : une association auto restait "suggérée",
-      // affichait un bouton "Confirmer" dans ActivityDetail.js, et la séance planifiée ne se
-      // cochait PAS comme faite tant que ce clic n'avait pas eu lieu — voir le commentaire de
-      // persistMatch dans ce même composant pour l'ancien raisonnement UX) : désormais, une
-      // correspondance automatique (jour + discipline) coche directement la séance comme
-      // faite, sans étape de confirmation manuelle. Reste librement modifiable ensuite via le
-      // menu déroulant d'ActivityDetail.js (qui repasse alors match_source à 'manual') si le
-      // rapprochement automatique s'avérait faux (ex: sortie improvisée un jour de repos).
-      match_confirmed: Boolean(weekKey),
+      // Demande explicite de l'athlète : une correspondance 'exact' (même jour réel que le
+      // jour planifié + même discipline) coche directement la séance comme faite, sans
+      // confirmation manuelle. Une correspondance 'fuzzy' (séance faite un autre jour que
+      // prévu — voir findAutoMatch) reste en revanche une SUGGESTION à valider soi-même dans
+      // ActivityDetail.js : associer à l'aveugle une activité à une séance d'un autre jour est
+      // trop souvent faux pour être fusionné sans validation (cas réel signalé : sortie faite
+      // un autre jour, associée par erreur à une séance de même discipline coïncidant avec le
+      // jour réel). Reste librement modifiable ensuite via le menu déroulant (qui repasse
+      // alors match_source à 'manual') si le rapprochement s'avérait faux.
+      match_confirmed: confidence === 'exact',
       ai_analysis: analysis,
       ai_analysis_status: analysisStatus,
     },
