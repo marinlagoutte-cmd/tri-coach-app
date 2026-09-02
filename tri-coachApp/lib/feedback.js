@@ -1,6 +1,7 @@
 // lib/feedback.js
 // Interprétation du ressenti post-séance (dureté / forme physique) et
 // comparaison avec ce que le coach avait prévu (RPE cible de la séance).
+import { isHigherPerceivedEffortPhase } from './cycleTracking';
 
 function parseRpe(rpe) {
   const m = String(rpe || '').match(/(\d+(?:\.\d+)?)\s*\/\s*10/);
@@ -24,23 +25,39 @@ export function computeUserBias(history) {
  * Analyse un ressenti de séance (1-10 dureté, 1-10 forme physique) et
  * détermine si l'écart avec l'attendu justifie de proposer un allègement
  * de la suite de la semaine.
+ *
+ * `cyclePhase` (Point 8, optionnel — voir lib/cycleTracking.js) : phase du cycle menstruel
+ * estimée le jour de la séance, SI le suivi est activé et qu'au moins une date a été
+ * déclarée par l'athlète (sinon toujours `null`, jamais d'hypothèse par défaut). "Si besoin"
+ * seulement : ça ne change rien tant que la phase n'est pas de celles où un ressenti plus
+ * dur est physiologiquement attendu (menstruelle, ou tout derniers jours de la phase
+ * lutéale) — voir isHigherPerceivedEffortPhase.
  */
-export function analyzeFeedback(workout, feedback, history = []) {
+export function analyzeFeedback(workout, feedback, history = [], cyclePhase = null) {
   const expectedDifficulty = parseRpe(workout?.rpe);
   const rawGap = feedback.difficulty - expectedDifficulty;
   const userBias = computeUserBias(history);
   const adjustedGap = rawGap - userBias;
 
+  // Tolère 1 point d'écart de plus avant de traiter un ressenti plus dur comme un signal de
+  // surcharge, quand la phase du cycle déclarée en rend un peu plus difficile physiologiquement
+  // attendu — sans jamais masquer un écart réellement extrême (voir seuils ci-dessous).
+  const cycleLeniency = isHigherPerceivedEffortPhase(cyclePhase) ? 1 : 0;
+
   // Nettement plus dur que la tendance habituelle de l'athlète + forme ressentie faible
   // = signal fort de mauvais jour / séance mal calée pour cette fois-ci.
-  const hardAndWeak = adjustedGap >= 2 && feedback.capacity <= 4;
+  const hardAndWeak = (adjustedGap - cycleLeniency) >= 2 && feedback.capacity <= Math.max(1, 4 - cycleLeniency);
   // Forme très faible sur une séance jugée difficile, même sans grand écart vs attendu.
-  const veryWeak = feedback.capacity <= 2 && feedback.difficulty >= 7;
+  const veryWeak = feedback.capacity <= Math.max(1, 2 - cycleLeniency) && feedback.difficulty >= 7 + cycleLeniency;
   const needsCheck = hardAndWeak || veryWeak;
 
+  const cycleNote = cycleLeniency > 0
+    ? ' (phase du cycle actuelle prise en compte : un ressenti un peu plus dur est cohérent avec cette période, mais l\'écart reste marqué même avec cette marge)'
+    : '';
+
   const reason = !needsCheck ? '' : hardAndWeak
-    ? `Séance ressentie ${feedback.difficulty}/10 (plus dur que d'habitude pour toi) avec une forme faible (${feedback.capacity}/10) : possible mauvais jour.`
-    : `Forme très faible ressentie (${feedback.capacity}/10) sur une séance difficile (${feedback.difficulty}/10).`;
+    ? `Séance ressentie ${feedback.difficulty}/10 (plus dur que d'habitude pour toi) avec une forme faible (${feedback.capacity}/10) : possible mauvais jour.${cycleNote}`
+    : `Forme très faible ressentie (${feedback.capacity}/10) sur une séance difficile (${feedback.difficulty}/10).${cycleNote}`;
 
   return {
     expectedDifficulty,
