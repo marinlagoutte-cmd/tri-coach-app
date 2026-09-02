@@ -24,22 +24,52 @@ export function isoDateToDayName(isoDateStr) {
 }
 
 /**
- * Cherche, dans workouts.N (uniquement — voir doc en tête de fichier), la
- * séance dont le jour correspond au jour réel de l'activité ET dont la
- * discipline correspond au sport Strava. Retourne null si rien ne correspond
- * (pas d'erreur : c'est un cas normal, ex. séance de muscu, jour non planifié).
+ * Cherche, dans workouts.N (uniquement — voir doc en tête de fichier), la séance la plus
+ * plausible pour une activité Strava réalisée.
+ *
+ * DEUX NIVEAUX DE CONFIANCE (demande explicite de l'athlète, suite à un cas réel de mauvaise
+ * association quand la séance n'est pas faite le bon jour) :
+ * - 'exact' : le jour réel de l'activité correspond au jour PLANIFIÉ d'une séance de même
+ *   discipline. Confiance suffisante pour une fusion AUTOMATIQUE sans validation (voir
+ *   `match_confirmed` posé à `confidence === 'exact'` dans webhook.js/stravaSync.js).
+ * - 'fuzzy' : aucune séance de même discipline ce jour-là, mais une autre séance de même
+ *   discipline existe ailleurs dans la semaine (ex: séance de mardi faite jeudi à la place).
+ *   Seulement une SUGGESTION affichée à l'athlète (ActivityDetail.js) — jamais confirmée
+ *   automatiquement, car associer à l'aveugle une activité à une séance d'un autre jour est
+ *   plus souvent faux que juste (un jour "libre" peut très bien être une sortie non planifiée).
+ *   Retient la séance dont le jour planifié est le plus PROCHE du jour réel (avant ou après),
+ *   hypothèse la plus probable d'un simple décalage de quelques jours dans la semaine.
+ *
+ * `claimedWorkoutIds` (Set) exclut toute séance déjà associée-confirmée à UNE AUTRE activité
+ * de la même semaine (webhook.js/stravaSync.js le peuplent depuis les activités déjà en base
+ * + celles déjà traitées dans le même lot d'import) — sans ça, deux activités pourraient
+ * revendiquer la même séance planifiée.
+ *
+ * Retourne { weekKey: null, workoutId: null, confidence: null } si rien ne correspond (pas
+ * une erreur : cas normal, ex. séance de muscu, jour non planifié).
  */
-export function findAutoMatch(activity, workouts) {
+export function findAutoMatch(activity, workouts, claimedWorkoutIds = new Set()) {
   const dayName = isoDateToDayName(activity.start_date_local || activity.start_date);
   const discipline = stravaSportToDiscipline(activity.sport_type || activity.type);
-  if (!dayName || !discipline) return { weekKey: null, workoutId: null };
+  if (!dayName || !discipline) return { weekKey: null, workoutId: null, confidence: null };
 
   const weekWorkouts = workouts?.N || [];
   const sportShort = shortLabel(discipline);
-  const candidate = weekWorkouts.find(
-    (w) => w.day?.toLowerCase() === dayName.toLowerCase() && w.type !== 'REPOS' && shortLabel(w.type) === sportShort
-  );
-  return candidate ? { weekKey: 'N', workoutId: candidate.id } : { weekKey: null, workoutId: null };
+  const isCandidate = (w) => w.type !== 'REPOS' && shortLabel(w.type) === sportShort && !claimedWorkoutIds.has(w.id);
+
+  const exact = weekWorkouts.find((w) => isCandidate(w) && w.day?.toLowerCase() === dayName.toLowerCase());
+  if (exact) return { weekKey: 'N', workoutId: exact.id, confidence: 'exact' };
+
+  const dayIdx = DAYS_OF_WEEK.findIndex((d) => d.toLowerCase() === dayName.toLowerCase());
+  const fuzzyCandidates = weekWorkouts.filter(isCandidate);
+  if (fuzzyCandidates.length === 0) return { weekKey: null, workoutId: null, confidence: null };
+
+  const dayDistance = (w) => {
+    const idx = DAYS_OF_WEEK.findIndex((d) => d.toLowerCase() === w.day?.toLowerCase());
+    return idx === -1 ? 7 : Math.abs(idx - dayIdx);
+  };
+  const fuzzy = [...fuzzyCandidates].sort((a, b) => dayDistance(a) - dayDistance(b))[0];
+  return { weekKey: 'N', workoutId: fuzzy.id, confidence: 'fuzzy' };
 }
 
 /** mm:ss ou h:mm:ss à partir d'un nombre de secondes. */
