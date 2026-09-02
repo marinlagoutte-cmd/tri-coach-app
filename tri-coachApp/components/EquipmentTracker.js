@@ -598,6 +598,29 @@ export default function EquipmentTracker({ session }) {
     await load();
   }
 
+  /**
+   * Action manuelle groupée (demande explicite de l'athlète) : remet TOUTES les pièces
+   * usables (lifespan_km > 0) d'un vélo à l'usure MAX (100%), en un clic — même principe
+   * que le comportement déjà appliqué par défaut à un vélo NOUVELLEMENT synchronisé (voir
+   * lib/equipment.js:backfillComponents, "pré-remplit à l'usure MAX par défaut"), mais
+   * applicable ici rétroactivement à un vélo déjà suivi (ex. matériel synchronisé avant ce
+   * comportement par défaut, ou remis à zéro après une révision complète chez le vélociste
+   * dont on ne connaît pas le détail pièce par pièce — direction inverse de "Marquer comme
+   * changé", qui remet une pièce précise à 0%). Confirmation demandée avant d'écraser les
+   * corrections déjà saisies manuellement, car c'est une action groupée irréversible en un
+   * clic (chaque pièce reste corrigeable individuellement ensuite via KmField).
+   */
+  async function resetAllComponentsToMaxWear(equipment) {
+    const usable = equipment.components.filter((c) => c.lifespan_km > 0);
+    if (usable.length === 0) return;
+    if (!window.confirm(`Remettre les ${usable.length} pièce(s) usables de "${equipment.name}" à l'usure MAX (100%) ? Toute correction déjà saisie sur ces pièces sera écrasée.`)) return;
+    const totalKm = (equipment.total_distance_m || 0) / 1000;
+    await Promise.all(
+      usable.map((c) => supabase.from('equipment_components').update({ baseline_km: totalKm - c.lifespan_km, updated_at: new Date().toISOString() }).eq('id', c.id))
+    );
+    await load();
+  }
+
   // Point 6 — coût du matériel : même principe que saveKm ci-dessus, pour le prix de
   // remplacement de la pièce (voir cost_eur, supabase-migration-cost-2026-08.sql).
   async function saveCost(component, newCost) {
@@ -730,6 +753,15 @@ export default function EquipmentTracker({ session }) {
           <button onClick={() => setView({ level: 'list' })} style={{ border: 'none', background: 'none', color: C.textSecondary, fontSize: 13, cursor: 'pointer', padding: '4px 6px' }}>← Matériel</button>
           <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>{activeEquipment.name}</div>
         </div>
+
+        {activeEquipment.kind === 'bike' && (
+          <button
+            onClick={() => resetAllComponentsToMaxWear(activeEquipment)}
+            style={{ alignSelf: 'flex-start', fontSize: 12, fontWeight: 500, color: C.textSecondary, background: 'none', border: `1px solid ${C.border}`, borderRadius: 8, padding: '6px 12px', cursor: 'pointer' }}
+          >
+            Réinitialiser toutes les pièces à l'usure max
+          </button>
+        )}
 
         <MediaFrame photo={photoSet?.overview} vectorRatio={600 / 300}>
           {!photoSet && <OverviewArt />}
