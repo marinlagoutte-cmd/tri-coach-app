@@ -116,7 +116,12 @@ export default function WeatherRadarMap() {
 
   const refreshWindGrid = useCallback(async () => {
     const map = mapRef.current;
-    if (!map || !showWind) return;
+    if (!map) return;
+    // Anciennement `if (!map || !showWind) return;` — mais la prévision de précipitations
+    // 24h (precip24h, dérivée de ces mêmes données, voir plus bas) doit rester à jour même
+    // quand l'athlète masque l'affichage des flèches de vent (showWind=false) : les deux
+    // fonctionnalités partagent le même appel Open-Meteo. Le dessin des flèches reste, lui,
+    // bien gated par showWindRef séparément (voir l'effet de dessin sur canvas plus bas).
     const bounds = map.getBounds();
     const latStep = (bounds.getNorth() - bounds.getSouth()) / (WIND_GRID_SIZE - 1);
     const lonStep = (bounds.getEast() - bounds.getWest()) / (WIND_GRID_SIZE - 1);
@@ -144,6 +149,26 @@ export default function WeatherRadarMap() {
       setWindLoading(false);
     }
   }, [showWind]);
+
+  // Prévision de précipitations sur 24h (demande explicite de l'athlète, "radar pluie sur
+  // 24h") — dérivée du PREMIER point de la grille de vent déjà chargée ci-dessus (même appel
+  // Open-Meteo hourly.precipitation/precipitation_probability, aucune requête réseau en
+  // plus), à partir de l'heure actuelle et sur les 24 heures suivantes. Volontairement une
+  // prévision CHIFFRÉE (mm/h + probabilité), pas une imagerie radar animée : voir le
+  // commentaire dans le JSX pour pourquoi l'imagerie radar réelle ne peut pas, elle,
+  // s'étendre à 24h avec l'API gratuite utilisée plus bas.
+  const precip24h = React.useMemo(() => {
+    const hourly = gridWindData[0]?.hourly;
+    if (!hourly?.time?.length) return [];
+    const nowIdx = hourly.time.findIndex((t) => new Date(t) >= new Date());
+    const startIdx = nowIdx === -1 ? 0 : nowIdx;
+    return hourly.time.slice(startIdx, startIdx + 24).map((t, i) => ({
+      time: t,
+      label: new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit' }),
+      mm: hourly.precipitation?.[startIdx + i] ?? 0,
+      probability: hourly.precipitation_probability?.[startIdx + i] ?? 0,
+    }));
+  }, [gridWindData]);
 
   // Légende pluie affichée à côté du radar (échelle standard d'intensité, cohérente avec
   // la palette du calque radar réel ci-dessous).
@@ -765,6 +790,41 @@ export default function WeatherRadarMap() {
                 {radarLoading ? 'Chargement du radar…' : radarFrameLabel(radarFrames[radarFrameIndex]) || 'Radar indisponible'}
               </p>
               <p className="text-[9px] text-ink-600 text-center">▶ pour lancer la boucle radar (comme sur un site radar météo) : dernière heure observée + prévision immédiate.</p>
+            </div>
+            {/* Demande explicite de l'athlète : "le radar pluie doit aussi être sur 24h". La
+                vraie imagerie radar (RainViewer, gratuit) ne couvre QUE ~2h de passé + ~30min
+                de prévision immédiate ("nowcast") — aucune option gratuite ne permet d'étendre
+                cette imagerie à 24h (l'API étendue de RainViewer est payante). Ce qui EST
+                honnêtement disponible sur 24h, et déjà chargé pour la grille de vent ci-dessus
+                (même appel Open-Meteo, hourly.precipitation/precipitation_probability — aucune
+                requête réseau supplémentaire) : la prévision CHIFFRÉE de précipitations heure
+                par heure. Affichée ici en complément du radar animé, pas à sa place. */}
+            <div className="pt-2 mt-1 border-t border-ink-800 space-y-1.5">
+              <p className="text-[9px] font-bold text-ink-400 uppercase">Précipitations prévues — 24h (le radar animé ci-dessus ne couvre que l'heure en cours)</p>
+              {precip24h.length > 0 ? (
+                <div className="flex items-end gap-[2px] h-14">
+                  {precip24h.map((h) => {
+                    const heightPct = Math.min(100, (h.mm / 5) * 100); // 5mm/h = barre pleine
+                    return (
+                      <div key={h.time} className="flex-1 flex flex-col items-center justify-end gap-0.5" title={`${h.label} · ${h.mm.toFixed(1)}mm · ${h.probability}%`}>
+                        <div
+                          className="w-full rounded-sm bg-sky-500"
+                          style={{ height: `${Math.max(2, heightPct)}%`, opacity: 0.35 + (h.probability / 100) * 0.65 }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-[9px] text-ink-600">Chargement des précipitations 24h…</p>
+              )}
+              {precip24h.length > 0 && (
+                <div className="flex justify-between text-[8px] text-ink-600 font-mono">
+                  <span>{precip24h[0]?.label}</span>
+                  <span>{precip24h[Math.floor(precip24h.length / 2)]?.label}</span>
+                  <span>{precip24h[precip24h.length - 1]?.label}</span>
+                </div>
+              )}
             </div>
           </>
         )}
