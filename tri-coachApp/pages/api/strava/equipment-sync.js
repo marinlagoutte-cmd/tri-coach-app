@@ -59,9 +59,9 @@ export default async function handler(req, res) {
       }).eq('user_id', userId);
     }
 
-    const { synced, error } = await syncEquipmentFromStrava(admin, userId, stravaAccessToken);
+    const { synced, details, error } = await syncEquipmentFromStrava(admin, userId, stravaAccessToken);
     if (error) return res.status(502).json({ error: "La synchronisation Strava a échoué. Réessaie dans un instant." });
-    return res.status(200).json({ synced });
+    return res.status(200).json({ synced, details });
   } catch (e) {
     console.error('[api/strava/equipment-sync] error:', e?.message || e);
     return res.status(500).json({ error: "La synchronisation a échoué. Réessaie dans un instant." });
