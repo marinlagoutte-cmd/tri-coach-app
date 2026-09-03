@@ -87,9 +87,10 @@ export const DEFAULT_SHOE_COMPONENT = { zone: 'shoe', part_key: 'usure', name: '
  * matériel déjà connu : seulement celles ajoutées depuis, ou manquantes suite à une
  * précédente erreur d'insertion), et pré-remplit les détails techniques connus quand le
  * matériel est reconnu (voir isAeroad). `baseline_km` d'une pièce de VÉLO nouvellement
- * créée place l'usure à 100% par défaut (voir commentaire sur `baseline_km` plus bas) ;
- * pour une chaussure, `baseline_km` = kilométrage total ACTUEL (usure 0%), voir docstring
- * de syncEquipmentFromStrava.
+ * créée vaut TOUJOURS 0 par défaut (voir commentaire sur `baseline_km` plus bas) — demande
+ * explicite de l'athlète, remplace un précédent réglage "usure max" qui donnait un km
+ * différent du compteur du vélo pièce par pièce ; pour une chaussure, `baseline_km` =
+ * kilométrage total ACTUEL (usure 0%), voir docstring de syncEquipmentFromStrava.
  */
 async function backfillComponents(admin, equipmentId, gear) {
   const { data: existingComponents, error: selectError } = await admin
@@ -117,17 +118,16 @@ async function backfillComponents(admin, equipmentId, gear) {
       part_key: t.part_key,
       name: t.name,
       lifespan_km: t.lifespan_km,
-      // Vélo : on ne sait pas quand chaque pièce a réellement été posée, donc plutôt que
-      // de supposer "neuve" (baseline = totalKm, usure 0%) — ce qui masquerait une pièce en
-      // fait déjà usée et donnerait un faux sentiment de sécurité — on pré-remplit à l'usure
-      // MAX (baseline = totalKm - lifespan_km, cf. currentKm dans EquipmentTracker.js :
-      // km affiché = totalKm - baseline, donc ici km affiché = lifespan_km → barre à 100%).
-      // Volontairement pessimiste par défaut : l'athlète corrige ensuite au cas par cas
-      // (champ km éditable) s'il connaît la vraie usure. Pour lifespan_km = 0 (pièces "de
-      // référence" sans barre d'usure, ex. cadre/fourche), la soustraction ne change rien
-      // (baseline = totalKm, comme avant). Chaussures : inchangé (baseline = totalKm, la
-      // pièce "Amorti" démarre à 0%) — l'athlète les ajoute généralement neuves.
-      baseline_km: gear.kind === 'bike' ? totalKm - t.lifespan_km : totalKm,
+      // DEMANDE EXPLICITE DE L'ATHLÈTE (remplace un précédent réglage "usure MAX" qui
+      // affichait le km de PLEINE VIE de la pièce — ex. 3000km pour une chaîne — plutôt que
+      // le vrai kilométrage du vélo) : chaque pièce de vélo nouvellement suivie démarre avec
+      // le MÊME kilométrage que le vélo lui-même (baseline = 0, cf. currentKm dans
+      // EquipmentTracker.js : km affiché = totalKm - baseline = totalKm quand baseline=0).
+      // Hypothèse : la pièce est sur le vélo depuis le début — l'athlète corrige ensuite au
+      // cas par cas (champ km éditable) si une pièce a en fait été changée en cours de route.
+      // Chaussures : inchangé (baseline = totalKm, la pièce "Amorti" démarre à 0%) —
+      // l'athlète les ajoute généralement neuves.
+      baseline_km: gear.kind === 'bike' ? 0 : totalKm,
       details: specs[t.part_key] || '',
       cost_eur: t.cost_eur ?? 0,
     }));
