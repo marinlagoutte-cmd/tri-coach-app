@@ -599,24 +599,27 @@ export default function EquipmentTracker({ session }) {
   }
 
   /**
-   * Action manuelle groupée (demande explicite de l'athlète) : remet TOUTES les pièces
-   * usables (lifespan_km > 0) d'un vélo à l'usure MAX (100%), en un clic — même principe
-   * que le comportement déjà appliqué par défaut à un vélo NOUVELLEMENT synchronisé (voir
-   * lib/equipment.js:backfillComponents, "pré-remplit à l'usure MAX par défaut"), mais
-   * applicable ici rétroactivement à un vélo déjà suivi (ex. matériel synchronisé avant ce
-   * comportement par défaut, ou remis à zéro après une révision complète chez le vélociste
-   * dont on ne connaît pas le détail pièce par pièce — direction inverse de "Marquer comme
-   * changé", qui remet une pièce précise à 0%). Confirmation demandée avant d'écraser les
+   * Action manuelle groupée (demande explicite de l'athlète, mise à jour) : remet TOUTES les
+   * pièces d'un vélo au MÊME kilométrage que le vélo lui-même (baseline = 0 → km affiché =
+   * totalKm), en un clic — même principe que le comportement désormais appliqué par défaut à
+   * un vélo NOUVELLEMENT synchronisé (voir lib/equipment.js:backfillComponents), mais
+   * applicable ici rétroactivement à un vélo déjà suivi dont les pièces sont restées bloquées
+   * à l'ancien défaut (0 km, créées avant ce réglage) — direction inverse de "Marquer comme
+   * changé", qui remet une pièce précise à 0%. Confirmation demandée avant d'écraser les
    * corrections déjà saisies manuellement, car c'est une action groupée irréversible en un
    * clic (chaque pièce reste corrigeable individuellement ensuite via KmField).
+   *
+   * NOTE : appelée resetAllComponentsToMaxWear pour l'historique du fichier, mais ne met plus
+   * les pièces à leur usure MAX individuelle (ancien comportement, remplacé) — désormais au
+   * kilométrage du vélo, ce qui peut être en dessous, à, ou au-dessus de 100% de la durée de
+   * vie de chaque pièce selon son lifespan_km propre.
    */
   async function resetAllComponentsToMaxWear(equipment) {
     const usable = equipment.components.filter((c) => c.lifespan_km > 0);
     if (usable.length === 0) return;
-    if (!window.confirm(`Remettre les ${usable.length} pièce(s) usables de "${equipment.name}" à l'usure MAX (100%) ? Toute correction déjà saisie sur ces pièces sera écrasée.`)) return;
-    const totalKm = (equipment.total_distance_m || 0) / 1000;
+    if (!window.confirm(`Remettre les ${usable.length} pièce(s) usables de "${equipment.name}" au kilométrage du vélo ? Toute correction déjà saisie sur ces pièces sera écrasée.`)) return;
     await Promise.all(
-      usable.map((c) => supabase.from('equipment_components').update({ baseline_km: totalKm - c.lifespan_km, updated_at: new Date().toISOString() }).eq('id', c.id))
+      usable.map((c) => supabase.from('equipment_components').update({ baseline_km: 0, updated_at: new Date().toISOString() }).eq('id', c.id))
     );
     await load();
   }
@@ -759,7 +762,7 @@ export default function EquipmentTracker({ session }) {
             onClick={() => resetAllComponentsToMaxWear(activeEquipment)}
             style={{ alignSelf: 'flex-start', fontSize: 12, fontWeight: 500, color: C.textSecondary, background: 'none', border: `1px solid ${C.border}`, borderRadius: 8, padding: '6px 12px', cursor: 'pointer' }}
           >
-            Réinitialiser toutes les pièces à l'usure max
+            Réinitialiser toutes les pièces au km du vélo
           </button>
         )}
 
