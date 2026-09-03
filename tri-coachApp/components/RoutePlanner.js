@@ -115,6 +115,10 @@ export default function RoutePlanner({ session }) {
       setError('Choisis un point de départ (recherche une ville ou utilise ta position).');
       return;
     }
+    // Filet de sécurité : au cas où le champ serait encore vide (onBlur pas déclenché avant
+    // ce clic, ex. certains navigateurs mobiles) — jamais envoyer '' à l'API.
+    const safeDistanceKm = distanceKm === '' || Number.isNaN(Number(distanceKm)) ? 60 : Number(distanceKm);
+    const safeAvgSpeedKmh = avgSpeedKmh === '' || Number.isNaN(Number(avgSpeedKmh)) ? 28 : Number(avgSpeedKmh);
     setLoading(true);
     setError('');
     setResult(null);
@@ -127,8 +131,8 @@ export default function RoutePlanner({ session }) {
           startLat: start.lat,
           startLon: start.lon,
           startPlaceName: start.name,
-          distanceKm,
-          avgSpeedKmh,
+          distanceKm: safeDistanceKm,
+          avgSpeedKmh: safeAvgSpeedKmh,
           departure,
           language: lang,
         }),
@@ -230,7 +234,25 @@ export default function RoutePlanner({ session }) {
               min={5}
               max={300}
               value={distanceKm}
-              onChange={(e) => setDistanceKm(Number(e.target.value))}
+              onChange={(e) => {
+                // BUG SIGNALÉ ("un zéro qui bug sur distance et vitesse moyenne") : avec
+                // `onChange={(e) => setDistanceKm(Number(e.target.value))}`, effacer le champ
+                // pour retaper une valeur donne d'abord e.target.value === '' →
+                // Number('') === 0 → l'input réaffiche aussitôt "0", et la touche suivante
+                // tapée s'ajoute à ce "0" ("08" au lieu de "8") au lieu de partir d'un champ
+                // vide. On autorise maintenant une valeur vide TRANSITOIRE (l'utilisateur est
+                // en train de taper), reclampée à une valeur valide seulement à la sortie du
+                // champ (onBlur ci-dessous) — jamais pendant la frappe.
+                const raw = e.target.value;
+                if (raw === '') { setDistanceKm(''); return; }
+                const n = Number(raw);
+                if (!Number.isNaN(n)) setDistanceKm(n);
+              }}
+              onBlur={() => {
+                const n = Number(distanceKm);
+                if (distanceKm === '' || Number.isNaN(n)) setDistanceKm(60);
+                else setDistanceKm(Math.min(300, Math.max(5, n)));
+              }}
               className="w-full bg-ink-950 border border-ink-700 rounded-xl px-3 py-2 text-xs text-ink-50"
             />
           </div>
@@ -241,7 +263,18 @@ export default function RoutePlanner({ session }) {
               min={10}
               max={50}
               value={avgSpeedKmh}
-              onChange={(e) => setAvgSpeedKmh(Number(e.target.value))}
+              onChange={(e) => {
+                // Même correctif que le champ Distance ci-dessus (voir son commentaire).
+                const raw = e.target.value;
+                if (raw === '') { setAvgSpeedKmh(''); return; }
+                const n = Number(raw);
+                if (!Number.isNaN(n)) setAvgSpeedKmh(n);
+              }}
+              onBlur={() => {
+                const n = Number(avgSpeedKmh);
+                if (avgSpeedKmh === '' || Number.isNaN(n)) setAvgSpeedKmh(28);
+                else setAvgSpeedKmh(Math.min(50, Math.max(10, n)));
+              }}
               className="w-full bg-ink-950 border border-ink-700 rounded-xl px-3 py-2 text-xs text-ink-50"
             />
           </div>
